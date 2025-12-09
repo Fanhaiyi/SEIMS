@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>就业匹配平台</title>
+    <link rel="stylesheet" href="./styles.css">
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header class="app-header">
+        <div class="brand">就业匹配平台</div>
+        <nav class="top-nav">
+            <button data-route="home">首页</button>
+            <button data-route="jobs">岗位浏览搜索</button>
+            <button data-route="match">能力→岗位匹配</button>
+            <button data-route="inverse">岗位→能力推荐</button>
+            <div class="dropdown">
+                <button class="dropdown-toggle">我的 ▾</button>
+                <div class="dropdown-menu">
+                    <button data-route="profile">我的信息</button>
+                    <button data-route="favorites">我的收藏</button>
+                    <button data-route="applications">我的投递</button>
+                </div>
+            </div>
+        </nav>
+        <div class="header-right">
+            <div id="authArea">
+                <button id="authBtn" class="btn btn-outline" style="padding:8px 12px; font-size:14px;">登录/注册</button>
+            </div>
+        </div>
+    </header>
+
+    <main id="app" class="container">
+        <!-- 路由视图会被 app.js 动态填充 -->
+    </main>
+
+    <footer class="app-footer">© 2025 就业匹配平台 Demo</footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="./app.js"></script>
+</body>
+</html>
+
+
