@@ -1,6 +1,6 @@
 // Simple SPA for Job Matching Platform (Demo)
 // Features: auth (mock), profile management, job browse/search, skill→job match, job→skills recommendation, radar visualization
-//wzy上传测试
+//wzy 上传测试 
 (function () {
     const appEl = document.getElementById('app');
     const authBtn = document.getElementById('authBtn');
