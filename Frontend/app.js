@@ -216,46 +216,63 @@
     // --- Views ---
     function viewHome() {
         return `
-        <section class="hero">
-            <div class="hero-left">
-                <h1>海量优质岗位，在线直达</h1>
-                <p class="muted">完善个人画像，智能匹配岗位；或从岗位反推能力清单，明确成长路径。</p>
-                
-                <div class="hero-actions">
-                    <button class="btn btn-primary" data-route="jobs">浏览岗位</button>
-                    <button class="btn btn-outline" data-route="match">开始匹配</button>
+        <!-- 轮播容器 -->
+        <section class="carousel-container">
+            <div class="carousel-track">
+                <div class="carousel-slide">
+                    <img src="./assets/首页1.jpg" alt="首页图片1">
+                    <div class="carousel-caption">
+                        <div class="carousel-title">
+                            <span class="line-1">多元分析</span>
+                            <span class="line-2">智能生成</span>
+                        </div>
+                        <div class="carousel-separator"></div>
+                        <p>Multivariate analysis, intelligent generation.</p>
+                    </div>
                 </div>
-                <div class="kpi">
-                    <div class="tile"><div class="value">${jobs.length}</div><div class="label">在招岗位</div></div>
-                    <div class="tile"><div class="value">${skillsUniverse.length}</div><div class="label">技能维度</div></div>
-                    <div class="tile"><div class="value">${Object.keys(state.profile.skills).length}</div><div class="label">你的技能条数</div></div>
+                <div class="carousel-slide">
+                    <img src="./assets/首页2.jpg" alt="首页图片2" class="carousel-img-top">
+                    <div class="carousel-caption caption-2">
+                        <div class="caption-line">
+                            <span class="cn">海量岗位</span>
+                            <span class="en">A vast number of positions</span>
+                        </div>
+                        <div class="carousel-separator separator-hz"></div>
+                        <div class="caption-line">
+                            <span class="cn">在线直达</span>
+                            <span class="en">accessible online directly</span>
+                        </div>
+                    </div>
                 </div>
-                
-                <!-- 信任背书 -->
-                <div class="logos-strip">
-                    <span class="logos-title">合作与数据来源</span>
-                    <div class="logos">
-                        <span class="logo-badge">招聘平台</span>
-                        <span class="logo-badge">企业数据</span>
-                        <span class="logo-badge">高校画像</span>
-                        <span class="logo-badge">行业报告</span>
+                <div class="carousel-slide">
+                    <img src="./assets/首页3.jpg" alt="首页图片3" class="carousel-img-top">
+                    <div class="carousel-caption">
+                        <div class="carousel-title">
+                            <span class="line-1">图谱赋能</span>
+                            <span class="line-2">检索升级</span>
+                        </div>
+                        <div class="carousel-separator"></div>
+                        <p>Graph empowerment, search upgrade.</p>
                     </div>
                 </div>
             </div>
-            <div class="hero-right">
-                <img class="hero-side-img" src="assets/hero.svg" alt="illustration">
+            <div class="carousel-dots">
+                <button class="carousel-dot active" data-index="0"></button>
+                <button class="carousel-dot" data-index="1"></button>
+                <button class="carousel-dot" data-index="2"></button>
             </div>
         </section>
 
         <!-- 功能优势 -->
         <section class="features container">
+            <h2 class="features-title">平台特色</h2>
             <div class="feature-card">
                 <div class="feature-icon">🎯</div>
                 <h3>精准匹配</h3>
                 <p>基于岗位-技能知识图谱，量化匹配度，先看是否合适再投递。</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon">🧠</div>
+                <div class="feature-icon"><img src="assets/ability.png" alt="能力反推"></div>
                 <h3>能力反推</h3>
                 <p>从目标岗位反推能力清单与等级，补齐差距，明确提升路径。</p>
             </div>
@@ -268,6 +285,11 @@
                 <div class="feature-icon">🔒</div>
                 <h3>隐私安全</h3>
                 <p>个人画像保存在本地并可同步到服务器，可随时删除与导出。</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon"><img src="assets/AI.jpg" alt="大模型推荐"></div>
+                <h3>大模型推荐</h3>
+                <p>大模型与数据库双引擎协同，推荐能力与岗位，提供多维理由与路径。</p>
             </div>
         </section>
 
@@ -283,6 +305,75 @@
             </div>
         </section>
         `;
+    }
+
+    function viewKnowledgeGraph() {
+        return `
+        <section class="card">
+            <h2>知识图谱可视化</h2>
+            <div class="empty" id="kgViewPlaceholder">
+                知识图谱
+            </div>
+        </section>
+        `;
+    }
+
+    // 初始化轮播
+    function initCarousel() {
+        const track = document.querySelector('.carousel-track');
+        const dots = document.querySelectorAll('.carousel-dot');
+        if (!track || dots.length === 0) return;
+
+        let currentIndex = 0;
+        const totalSlides = 3;
+        let autoScrollTimer = null;
+
+        // 更新小圆点状态
+        function updateDots(index) {
+            dots.forEach((dot, i) => {
+                if (i === index) {
+                    dot.classList.add('active');
+                } else {
+                    dot.classList.remove('active');
+                }
+            });
+        }
+
+        // 跳转到指定slide
+        function goToSlide(index) {
+            currentIndex = (index + totalSlides) % totalSlides; // 确保索引在有效范围内
+            const translateX = -currentIndex * 33.333; // 每个区域占33.333%
+            track.style.transform = `translateX(${translateX}%)`;
+            updateDots(currentIndex);
+        }
+
+        // 为小圆点添加点击事件
+        dots.forEach((dot, index) => {
+            dot.addEventListener('click', () => {
+                goToSlide(index);
+                resetAutoScroll(); // 重置自动滚动计时器
+            });
+        });
+
+        // 每4秒自动滚动到下一个
+        function startAutoScroll() {
+            autoScrollTimer = setInterval(() => {
+                goToSlide(currentIndex + 1);
+            }, 4000);
+        }
+
+        // 重置自动滚动计时器
+        function resetAutoScroll() {
+            if (autoScrollTimer) {
+                clearInterval(autoScrollTimer);
+            }
+            startAutoScroll();
+        }
+
+        // 初始化显示第一个
+        goToSlide(0);
+        // 开始自动滚动
+        startAutoScroll();
     }
 
     function getSkillOptionsHtml(category, selectedName) {
@@ -1374,6 +1465,7 @@
             state.route === 'jobs' ? viewJobs() :
             state.route === 'match' ? viewMatch() :
             state.route === 'inverse' ? viewInverse() :
+            state.route === 'kg' ? viewKnowledgeGraph() :
             state.route === 'jobDetail' ? viewJobDetail() :
             state.route === 'favorites' ? viewFavorites() :
             state.route === 'applications' ? viewApplications() :
@@ -1411,10 +1503,7 @@
     // --- Bindings ---
     function bindEventsForRoute() {
         if (state.route === 'home') {
-            const toJobs = document.querySelector('.hero [data-route="jobs"]');
-            const toMatch = document.querySelector('.hero [data-route="match"]');
-            if (toJobs) toJobs.addEventListener('click', () => navigate('jobs'));
-            if (toMatch) toMatch.addEventListener('click', () => navigate('match'));
+            initCarousel();
             const regBtn = document.getElementById('homeRegister');
             const loginBtn = document.getElementById('homeLogin');
             const authMessage = document.getElementById('homeAuthMessage');
