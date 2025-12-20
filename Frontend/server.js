@@ -252,7 +252,8 @@ const MYSQL_CONFIG = {
     host: process.env.MYSQL_HOST || 'localhost',
     port: parseInt(process.env.MYSQL_PORT || '3306'),
     user: process.env.MYSQL_USER || 'root',
-    password: process.env.MYSQL_PASSWORD || '200638',
+    // 密码必须通过环境变量提供，避免在代码中写死
+    password: process.env.MYSQL_PASSWORD,
     database: process.env.MYSQL_DATABASE || 'job_matching',
     charset: 'utf8mb4',
     waitForConnections: true,

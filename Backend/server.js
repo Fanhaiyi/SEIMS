@@ -7,7 +7,17 @@ const express = require('express');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
+
+// 加载 Backend 目录下的 .env 文件（不依赖运行时工作目录）
+require('dotenv').config({
+    path: path.join(__dirname, '.env'),
+});
+
+// 简单调试输出（不打印真实密码，只看是否加载到）
+console.log('ENV DEBUG -> MYSQL_PASSWORD set:', !!process.env.MYSQL_PASSWORD);
+console.log('ENV DEBUG -> NEO4J_PASSWORD set:', !!process.env.NEO4J_PASSWORD);
 const mysql = require('mysql2/promise'); // MySQL连接
+const neo4j = require('neo4j-driver'); // Neo4j连接
 
 const app = express();
 const PORT = process.env.PORT || 3001; // 改为3001端口
@@ -247,12 +257,14 @@ app.post('/api/profile/:userId', (req, res) => {
 // 知识图谱数据库服务配置（直接连接图谱2数据库服务）
 const KG_DB_SERVICE_URL = process.env.KG_DB_SERVICE_URL || 'http://localhost:5000';
 
-// MySQL数据库配置
+// ==================== MySQL（job_matching）配置 ====================
+
 const MYSQL_CONFIG = {
     host: process.env.MYSQL_HOST || 'localhost',
     port: parseInt(process.env.MYSQL_PORT || '3306'),
     user: process.env.MYSQL_USER || 'root',
-    password: process.env.MYSQL_PASSWORD || '200638',
+    // 密码必须通过环境变量提供，避免在代码中写死
+    password: process.env.MYSQL_PASSWORD,
     database: process.env.MYSQL_DATABASE || 'job_matching',
     charset: 'utf8mb4',
     waitForConnections: true,
@@ -268,6 +280,25 @@ try {
 } catch (error) {
     console.error('❌ MySQL连接池创建失败:', error.message);
     console.log('⚠️  岗位浏览功能将使用备用数据源');
+}
+
+// ==================== Neo4j 配置 ====================
+// 默认连接到本机 Neo4j（bolt 协议），用户名通过环境变量提供
+const NEO4J_URI = process.env.NEO4J_URI || 'bolt://localhost:7687';
+const NEO4J_USER = process.env.NEO4J_USER || 'neo4j';
+// 密码必须通过环境变量提供，避免在代码中写死
+const NEO4J_PASSWORD = process.env.NEO4J_PASSWORD;
+
+let neo4jDriver = null;
+try {
+  neo4jDriver = neo4j.driver(
+    NEO4J_URI,
+    neo4j.auth.basic(NEO4J_USER, NEO4J_PASSWORD)
+  );
+  console.log('✅ Neo4j 连接驱动创建成功');
+} catch (error) {
+  console.error('❌ Neo4j 连接驱动创建失败:', error.message);
+  console.log('⚠️  与知识图谱相关的直接 Neo4j 查询将不可用');
 }
 
 /**
@@ -765,25 +796,56 @@ app.get('/api/kg/skills', async (req, res) => {
 // ==================== 健康检查 ====================
 
 app.get('/api/health', (req, res) => {
-    // 检查图谱2数据库服务是否可用
-    fetch(`${KG_DB_SERVICE_URL}/api/health`, { 
+    // 并行检查：图谱2数据库服务、MySQL、Neo4j
+    const kgHealthPromise = fetch(`${KG_DB_SERVICE_URL}/api/health`, { 
         method: 'GET',
         timeout: 3000 
-    }).then(response => {
-        res.json({ 
-            success: true, 
-            message: '服务器运行正常',
-            kg_service: response.ok ? 'available' : 'unavailable',
-            timestamp: new Date().toISOString()
+    }).then(response => response.ok ? 'available' : 'unavailable')
+      .catch(() => 'unavailable');
+
+    const mysqlHealthPromise = (async () => {
+        if (!mysqlPool) return 'unavailable';
+        try {
+            const [rows] = await mysqlPool.query('SELECT 1 AS ok');
+            return rows && rows.length > 0 ? 'available' : 'unavailable';
+        } catch {
+            return 'unavailable';
+        }
+    })();
+
+    const neo4jHealthPromise = (async () => {
+        if (!neo4jDriver) return 'unavailable';
+        try {
+            const session = neo4jDriver.session();
+            await session.run('RETURN 1 AS ok');
+            await session.close();
+            return 'available';
+        } catch {
+            return 'unavailable';
+        }
+    })();
+
+    Promise.all([kgHealthPromise, mysqlHealthPromise, neo4jHealthPromise])
+        .then(([kgStatus, mysqlStatus, neo4jStatus]) => {
+            res.json({ 
+                success: true, 
+                message: '服务器运行正常',
+                kg_service: kgStatus,
+                mysql: mysqlStatus,
+                neo4j: neo4jStatus,
+                timestamp: new Date().toISOString()
+            });
+        })
+        .catch(() => {
+            res.json({ 
+                success: true, 
+                message: '服务器运行正常（健康检查部分失败）',
+                kg_service: 'unknown',
+                mysql: 'unknown',
+                neo4j: 'unknown',
+                timestamp: new Date().toISOString()
+            });
         });
-    }).catch(() => {
-        res.json({ 
-            success: true, 
-            message: '服务器运行正常（数据库服务未连接）',
-            kg_service: 'unavailable',
-            timestamp: new Date().toISOString()
-        });
-    });
 });
 
 // 根路径
