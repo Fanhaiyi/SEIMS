@@ -232,7 +232,7 @@
         <section class="carousel-container">
             <div class="carousel-track">
                 <div class="carousel-slide">
-                    <img src="./assets/首页1.jpg" alt="首页图片1">
+                    <img src="./assets/首页1（2）.jpg" alt="首页图片1">
                     <div class="carousel-caption">
                         <div class="carousel-title">
                             <span class="line-1">多元分析</span>
@@ -243,7 +243,7 @@
                     </div>
                 </div>
                 <div class="carousel-slide">
-                    <img src="./assets/首页2.jpg" alt="首页图片2" class="carousel-img-top">
+                    <img src="./assets/首页2（2）.jpg" alt="首页图片2" class="carousel-img-top">
                     <div class="carousel-caption caption-2">
                         <div class="caption-line">
                             <span class="cn">海量岗位</span>
@@ -257,7 +257,7 @@
                     </div>
                 </div>
                 <div class="carousel-slide">
-                    <img src="./assets/首页3.jpg" alt="首页图片3" class="carousel-img-top">
+                    <img src="./assets/首页3（2）.jpg" alt="首页图片3" class="carousel-img-top">
                     <div class="carousel-caption">
                         <div class="carousel-title">
                             <span class="line-1">图谱赋能</span>
