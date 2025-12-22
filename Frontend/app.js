@@ -1,6 +1,6 @@
 // Simple SPA for Job Matching Platform (Demo)
 // Features: auth (mock), profile management, job browse/search, skill→job match, job→skills recommendation, radar visualization
-
+//wzy 上传测试 
 (function () {
     const appEl = document.getElementById('app');
     const authBtn = document.getElementById('authBtn');
@@ -29,6 +29,226 @@
         }
     }
 
+    // 全局变量：存储vis-network实例
+    let network = null;
+
+    // 加载岗位大类下拉框（核心：用原始ID graphPageNameSelect）
+    async function loadPageNames() {
+        console.log('=== 开始加载岗位大类数据 ===');
+        try {
+            // 调用后端接口
+            const result = await apiRequest('/kg/pages');
+            console.log('后端返回原始数据:', JSON.stringify(result));
+
+            if (result.success && result.pages && result.pages.length > 0) {
+                // 用原始ID获取下拉框
+                const pageNameSelect = document.getElementById('graphPageNameSelect');
+                if (!pageNameSelect) {
+                    console.error('未找到下拉框元素（ID: graphPageNameSelect）');
+                    return;
+                }
+
+                // 清空下拉框，保留默认选项
+                pageNameSelect.innerHTML = '<option value="">请选择岗位大类...</option>';
+
+                // 填充岗位大类选项（修复[object Object]问题）
+                orEach(item => {
+                    // 优先取后端返回的名称字段（根据实际接口返回调整，以下是兼容写法）
+                    const optionText = item.name || item.pageName || item.title || '未命名岗位';
+                    const optionValue = item.id || item.pageId || item.title;
+
+                    console.log('填充选项：', optionValue, optionText);
+
+                    const option = document.createElement('option');
+                    option.value = optionValue;
+                    option.textContent = optionText; // 赋值文字，不是对象
+                    pageNameSelect.appendChild(option);
+                });
+
+                console.log('下拉框填充完成，当前选项数：', pageNameSelect.options.length);
+            } else {
+                console.error('后端返回数据异常:', result);
+                alert('未获取到岗位大类数据，请检查后端服务');
+            }
+        } catch (error) {
+            console.error('加载岗位大类失败:', error);
+            alert('加载岗位大类失败：' + error.message);
+        }
+    }
+
+    // 检查vis-network库是否加载完成
+    function checkVisLoaded() {
+        return new Promise((resolve, reject) => {
+            const check = () => {
+                if (typeof vis !== 'undefined' && vis.Network && vis.DataSet) {
+                    resolve();
+                } else {
+                    if (check.count < 5) {
+                        check.count++;
+                        setTimeout(check, 500);
+                    } else {
+                        reject(new Error('vis-network库加载超时'));
+                    }
+                }
+            };
+            check.count = 0;
+            check();
+        });
+    }
+
+    // 图谱渲染核心逻辑
+    function initGraphRender() {
+        const loadGraphBtn = document.getElementById('loadGraphBtn');
+        const graphPageNameSelect = document.getElementById('graphPageNameSelect');
+        const graphContainer = document.getElementById('graphContainer');
+        const graphLoading = document.getElementById('graphLoading');
+        const graphError = document.getElementById('graphError');
+
+        if (!loadGraphBtn || !graphPageNameSelect || !graphContainer) {
+            console.error('图谱核心元素缺失');
+            return;
+        }
+
+        // 绑定加载图谱按钮点击事件
+        loadGraphBtn.addEventListener('click', async () => {
+            const pageId = graphPageNameSelect.value.trim();
+            if (!pageId) {
+                alert('请选择岗位大类');
+                return;
+            }
+
+            // 重置状态
+            graphLoading.style.display = 'block';
+            graphError.style.display = 'none';
+            graphContainer.innerHTML = '';
+            loadGraphBtn.disabled = true;
+            loadGraphBtn.textContent = '加载中...';
+
+            try {
+                // 1. 检查vis库
+                await checkVisLoaded();
+
+                // 2. 调用后端图谱接口
+                const result = await apiRequest('/-visualization', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pageName: pageId })
+                });
+
+                if (!result.success || !result.nodes || !result.edges) {
+                    throw new Error(result.message || '图谱数据格式错误');
+                }
+
+                // 3. 格式化节点
+                const nodes = result.nodes.map(node => {
+                    let background = '#d2e1f5', border = '#afc4e6', shape = 'circle', size = 22;
+                    let fontColor = '#1f2937', fontSize = 10;
+
+                    if (node.type === 'Page') {
+                        background = '#0b3b8c';
+                        border = '#082b63';
+                        size = 32;
+                        fontColor = '#ffffff';
+                        fontSize = 14;
+                    } else if (node.type === 'Category') {
+                        background = '#295fba';
+                        border = '#1f4b93';
+                        size = 28;
+                        fontColor = '#ffffff';
+                        fontSize = 12;
+                    }
+
+                    return {
+                        id: node.id,
+                        label: node.label || '',
+                        color: {
+                            background,
+                            border,
+                            highlight: { background, border: '#1f2937' }
+                        },
+                        shape,
+                        size,
+                        font: { size: fontSize, color: fontColor, align: 'center' },
+                        scaling: { label: { enabled: false } },
+                        title: `${node.type}: ${node.label}`
+                    };
+                });
+
+                // 4. 格式化边
+                const edges = result.edges.map(edge => {
+                    let edgeLabel = '';
+                    if (edge.label && !isNaN(parseFloat(edge.label))) {
+                        edgeLabel = parseFloat(edge.label).toFixed(2);
+                    }
+
+                    return {
+                        id: edge.id,
+                        from: edge.from,
+                        to: edge.to,
+                        label: edgeLabel,
+                        arrows: 'to',
+                        color: { color: '#9ca3af', highlight: '#4b5563' },
+                        width: edgeLabel ? 2.2 : 1.5,
+                        font: { size: 9, color: '#4b5563', strokeWidth: 2, strokeColor: '#ffffff' },
+                        smooth: { type: 'continuous', roundness: 0.2 }
+                    };
+                });
+
+                // 5. 渲染图谱
+                const data = {
+                    nodes: new vis.DataSet(nodes),
+                    edges: new vis.DataSet(edges)
+                };
+
+                const options = {
+                    nodes: { borderWidth: 1.5, shadow: { enabled: true, color: 'rgba(15,23,42,.25)', size: 10 } },
+                    edges: { smooth: { type: 'continuous' } },
+                    physics: {
+                        solver: 'forceAtlas2Based',
+                        forceAtlas2Based: { gravitationalConstant: -80, centralGravity: 0.015, springLength: 100 },
+                        stabilization: { iterations: 200 }
+                    },
+                    interaction: { hover: true, dragView: true, zoomView: true },
+                    layout: { improvedLayout: true }
+                };
+
+                // 销毁旧实例
+                if (network) network.destroy();
+
+                // 强制设置容器尺寸
+                graphContainer.style.width = '100%';
+                graphContainer.style.height = '600px';
+                const rect = graphContainer.getBoundingClientRect();
+
+                // 创建新实例
+                network = new vis.Network(graphContainer, data, options);
+                network.setSize(`${rect.width}px`, `${rect.height}px`);
+
+                // 稳定化后自适应
+                network.once('stabilizationEnd', () => {
+                    network.fit({ padding: 30, animation: { duration: 500 } });
+                });
+
+            } catch (error) {
+                console.error('图谱加载失败:', error);
+                graphError.style.display = 'block';
+                graphError.textContent = `加载失败: ${error.message}`;
+                graphContainer.innerHTML = `
+                    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); text-align:center; color:#dc2626;">
+                        <p>❌ 图谱加载失败</p>
+                        <p style="font-size:13px; margin-top:8px;">${error.message || '未知错误'}</p>
+                    </div>
+                `;
+            } finally {
+                graphLoading.style.display = 'none';
+                loadGraphBtn.disabled = false;
+                loadGraphBtn.textContent = '🔍 加载图谱';
+            }
+        });
+    }
+
+
+
     // --- API Helper Functions ---
     async function apiRequest(endpoint, options = {}) {
         try {
@@ -41,8 +261,20 @@
             });
             
             if (!response.ok) {
-                const error = await response.json().catch(() => ({ message: '请求失败' }));
-                throw new Error(error.message || '请求失败');
+                let errorMessage = `请求失败 (HTTP ${response.status})`;
+                try {
+                    const errorData = await response.json();
+                    errorMessage = errorData.message || errorData.error || errorMessage;
+                } catch (e) {
+                    // 如果响应不是JSON，尝试获取文本
+                    try {
+                        const text = await response.text();
+                        if (text) errorMessage = text.substring(0, 100);
+                    } catch (e2) {
+                        // 忽略
+                    }
+                }
+                throw new Error(errorMessage);
             }
             
             return await response.json();
@@ -123,20 +355,43 @@
     // 从后端加载技能选项（岗位到能力知识图谱）
     async function loadSkillOptionsFromBackend() {
         try {
+            // 路径保持 /kg/skills（apiRequest 内部补充 /api 前缀）
             const data = await apiRequest('/kg/skills', { method: 'GET' });
-            if (data && (data.hard_skills || data.soft_skills)) {
-                state.hardSkillOptions = data.hard_skills || [];
-                state.softSkillOptions = data.soft_skills || [];
-                console.log('✅ 从知识图谱加载技能列表成功:', state.hardSkillOptions.length, state.softSkillOptions.length);
-                return;
+            
+            // 优化1：优先判断后端返回的 success 字段（对齐接口文档）
+            if (!data?.success) {
+                console.warn('⚠️ 技能列表接口返回失败:', data?.message || '无失败原因');
+                throw new Error('接口返回 success: false');
             }
-            console.warn('⚠️ 技能列表接口返回为空，使用默认技能集合');
+
+            // 优化2：严格按文档解析 hard_skills/soft_skills，兼容空数组
+            const hardSkills = data.hard_skills || [];
+            const softSkills = data.soft_skills || [];
+            
+            // 优化3：区分“数据为空”和“接口成功但无数据”
+            if (hardSkills.length === 0 && softSkills.length === 0) {
+                console.warn('⚠️ 技能列表接口返回为空，使用默认技能集合');
+            } else {
+                state.hardSkillOptions = hardSkills;
+                state.softSkillOptions = softSkills;
+                console.log('✅ 从知识图谱加载技能列表成功:', hardSkills.length, '个硬技能,', softSkills.length, '个软技能');
+                return; // 成功加载则跳过兜底逻辑
+            }
         } catch (e) {
-            console.warn('⚠️ 获取技能列表失败，使用默认技能集合:', e.message);
+            // 优化4：细分错误类型，便于调试
+            if (e.message.includes('404')) {
+                console.error('❌ 技能列表接口404：请检查后端路由配置');
+            } else if (e.message.includes('503')) {
+                console.error('❌ 知识图谱服务不可用：请检查FastAPI是否启动');
+            } else {
+                console.warn('⚠️ 获取技能列表失败，使用默认技能集合:', e.message);
+            }
         }
-        // 出现任何异常时，使用静态技能集合作为兜底
+
+        // 兜底逻辑：使用静态技能集合，并打印兜底信息
         state.hardSkillOptions = skillsUniverse;
         state.softSkillOptions = [];
+        console.log('🔧 已启用默认技能集合，数量:', skillsUniverse.length);
     }
 
     // 异步加载技能选项（不阻塞后续渲染）
@@ -177,6 +432,10 @@
     function navigate(route) {
         state.route = route;
         render();
+
+        if (route === 'graphVisualization') {
+            setTimeout(loadPageNames, 100); // 延迟100ms确保DOM已渲染
+        }
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -216,46 +475,63 @@
     // --- Views ---
     function viewHome() {
         return `
-        <section class="hero">
-            <div class="hero-left">
-                <h1>海量优质岗位，在线直达</h1>
-                <p class="muted">完善个人画像，智能匹配岗位；或从岗位反推能力清单，明确成长路径。</p>
-                
-                <div class="hero-actions">
-                    <button class="btn btn-primary" data-route="jobs">浏览岗位</button>
-                    <button class="btn btn-outline" data-route="match">开始匹配</button>
+        <!-- 轮播容器 -->
+        <section class="carousel-container">
+            <div class="carousel-track">
+                <div class="carousel-slide">
+                    <img src="./assets/homepage1.jpg" alt="首页图片1">
+                    <div class="carousel-caption">
+                        <div class="carousel-title">
+                            <span class="line-1">多元分析</span>
+                            <span class="line-2">智能生成</span>
+                        </div>
+                        <div class="carousel-separator"></div>
+                        <p>Multivariate analysis, intelligent generation.</p>
+                    </div>
                 </div>
-                <div class="kpi">
-                    <div class="tile"><div class="value">${jobs.length}</div><div class="label">在招岗位</div></div>
-                    <div class="tile"><div class="value">${skillsUniverse.length}</div><div class="label">技能维度</div></div>
-                    <div class="tile"><div class="value">${Object.keys(state.profile.skills).length}</div><div class="label">你的技能条数</div></div>
+                <div class="carousel-slide">
+                    <img src="./assets/homepage2.jpg" alt="首页图片2" class="carousel-img-top">
+                    <div class="carousel-caption caption-2">
+                        <div class="caption-line">
+                            <span class="cn">海量岗位</span>
+                            <span class="en">A vast number of positions</span>
+                        </div>
+                        <div class="carousel-separator separator-hz"></div>
+                        <div class="caption-line">
+                            <span class="cn">在线直达</span>
+                            <span class="en">accessible online directly</span>
+                        </div>
+                    </div>
                 </div>
-                
-                <!-- 信任背书 -->
-                <div class="logos-strip">
-                    <span class="logos-title">合作与数据来源</span>
-                    <div class="logos">
-                        <span class="logo-badge">招聘平台</span>
-                        <span class="logo-badge">企业数据</span>
-                        <span class="logo-badge">高校画像</span>
-                        <span class="logo-badge">行业报告</span>
+                <div class="carousel-slide">
+                    <img src="./assets/homepage3.jpg" alt="首页图片3" class="carousel-img-top">
+                    <div class="carousel-caption">
+                        <div class="carousel-title">
+                            <span class="line-1">图谱赋能</span>
+                            <span class="line-2">检索升级</span>
+                        </div>
+                        <div class="carousel-separator"></div>
+                        <p>Graph empowerment, search upgrade.</p>
                     </div>
                 </div>
             </div>
-            <div class="hero-right">
-                <img class="hero-side-img" src="assets/hero.svg" alt="illustration">
+            <div class="carousel-dots">
+                <button class="carousel-dot active" data-index="0"></button>
+                <button class="carousel-dot" data-index="1"></button>
+                <button class="carousel-dot" data-index="2"></button>
             </div>
         </section>
 
         <!-- 功能优势 -->
         <section class="features container">
+            <h2 class="features-title">平台特色</h2>
             <div class="feature-card">
                 <div class="feature-icon">🎯</div>
                 <h3>精准匹配</h3>
                 <p>基于岗位-技能知识图谱，量化匹配度，先看是否合适再投递。</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon">🧠</div>
+                <div class="feature-icon"><img src="assets/ability.png" alt="能力反推"></div>
                 <h3>能力反推</h3>
                 <p>从目标岗位反推能力清单与等级，补齐差距，明确提升路径。</p>
             </div>
@@ -268,6 +544,11 @@
                 <div class="feature-icon">🔒</div>
                 <h3>隐私安全</h3>
                 <p>个人画像保存在本地并可同步到服务器，可随时删除与导出。</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon"><img src="assets/AI.jpg" alt="大模型推荐"></div>
+                <h3>大模型推荐</h3>
+                <p>大模型与数据库双引擎协同，推荐能力与岗位，提供多维理由与路径。</p>
             </div>
         </section>
 
@@ -283,6 +564,75 @@
             </div>
         </section>
         `;
+    }
+
+    function viewKnowledgeGraph() {
+        return `
+        <section class="card">
+            <h2>知识图谱可视化</h2>
+            <div class="empty" id="kgViewPlaceholder">
+                知识图谱
+            </div>
+        </section>
+        `;
+    }
+
+    // 初始化轮播
+    function initCarousel() {
+        const track = document.querySelector('.carousel-track');
+        const dots = document.querySelectorAll('.carousel-dot');
+        if (!track || dots.length === 0) return;
+
+        let currentIndex = 0;
+        const totalSlides = 3;
+        let autoScrollTimer = null;
+
+        // 更新小圆点状态
+        function updateDots(index) {
+            dots.forEach((dot, i) => {
+                if (i === index) {
+                    dot.classList.add('active');
+                } else {
+                    dot.classList.remove('active');
+                }
+            });
+        }
+
+        // 跳转到指定slide
+        function goToSlide(index) {
+            currentIndex = (index + totalSlides) % totalSlides; // 确保索引在有效范围内
+            const translateX = -currentIndex * 33.333; // 每个区域占33.333%
+            track.style.transform = `translateX(${translateX}%)`;
+            updateDots(currentIndex);
+        }
+
+        // 为小圆点添加点击事件
+        dots.forEach((dot, index) => {
+            dot.addEventListener('click', () => {
+                goToSlide(index);
+                resetAutoScroll(); // 重置自动滚动计时器
+            });
+        });
+
+        // 每4秒自动滚动到下一个
+        function startAutoScroll() {
+            autoScrollTimer = setInterval(() => {
+                goToSlide(currentIndex + 1);
+            }, 4000);
+        }
+
+        // 重置自动滚动计时器
+        function resetAutoScroll() {
+            if (autoScrollTimer) {
+                clearInterval(autoScrollTimer);
+            }
+            startAutoScroll();
+        }
+
+        // 初始化显示第一个
+        goToSlide(0);
+        // 开始自动滚动
+        startAutoScroll();
     }
 
     function getSkillOptionsHtml(category, selectedName) {
@@ -550,6 +900,26 @@
         </section>`;
     }
 
+    function skillInputRowForMatch(category, index, skillName = '', level = 3) {
+        const containerId = category === 'hard' ? 'hardSkillsContainer' : 'softSkillsContainer';
+        return `
+        <div class="skill-input-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+            <input type="text" 
+                   class="skill-name-input" 
+                   placeholder="技能名称" 
+                   value="${skillName}"
+                   style="flex:1; padding:8px 12px; border-radius:6px; border:1px solid rgba(11,27,58,.16);">
+            <select class="skill-level-select" 
+                    style="width:100px; padding:8px 12px; border-radius:6px; border:1px solid rgba(11,27,58,.16);">
+                ${[0,1,2,3,4,5].map(l => `<option value="${l}" ${l === level ? 'selected' : ''}>${l}分</option>`).join('')}
+            </select>
+            <button type="button" 
+                    class="remove-skill-btn" 
+                    style="width:32px; height:32px; border-radius:6px; border:1px solid #ef4444; background:#fee2e2; color:#dc2626; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:bold;"
+                    title="删除技能">−</button>
+        </div>`;
+    }
+
     function viewMatch() {
         return `
         <section class="card">
@@ -559,12 +929,18 @@
             <h3 style="margin-top:16px;">💡 输入您的技能</h3>
             <div class="row">
                 <div class="col-6">
-                    <label>我的硬实力（逗号分隔）</label>
-                    <input id="hardKeywords" placeholder="例如：Python, SQL, 算法">
+                    <label>我的硬实力</label>
+                    <div id="hardSkillsContainer" style="margin-bottom:8px;">
+                        ${skillInputRowForMatch('hard', 0)}
+                    </div>
+                    <button type="button" class="btn btn-outline" id="addHardSkillBtn" style="font-size:13px; padding:6px 12px;">+ 添加硬实力</button>
                 </div>
                 <div class="col-6">
-                    <label>我的软实力（逗号分隔）</label>
-                    <input id="softKeywords" placeholder="例如：沟通, 团队, 学习">
+                    <label>我的软实力</label>
+                    <div id="softSkillsContainer" style="margin-bottom:8px;">
+                        ${skillInputRowForMatch('soft', 0)}
+                    </div>
+                    <button type="button" class="btn btn-outline" id="addSoftSkillBtn" style="font-size:13px; padding:6px 12px;">+ 添加软实力</button>
                 </div>
             </div>
             <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -869,6 +1245,107 @@
         </section>`;
     }
 
+    // 1. 定义加载岗位大类的函数
+    async function loadPageNames() {
+        console.log('开始加载岗位大类数据'); // 调试日志，方便排查
+        try {
+            // 调用后端/api/kg/pages接口获取岗位大类
+            const result = await apiRequest('/kg/pages');
+            console.log('岗位大类接口返回:', result); // 打印接口数据，看是否正常
+            
+            // 只处理成功且有数据的情况
+            if (result && result.success && result.pages && result.pages.length > 0) {
+            const pageNameSelect = document.getElementById('pageNameSelect');
+            if (!pageNameSelect) {
+                console.error('找不到下拉框元素');
+                return;
+            }
+            
+            // 清空原有选项（保留默认）
+            pageNameSelect.innerHTML = '<option value="">请选择岗位大类...</option>';
+            
+            // 循环添加岗位大类选项
+            result.pages.forEach(item => {
+                const option = document.createElement('option');
+                option.value = item.id || item.pageId; // 兼容不同字段名
+                option.textContent = item.name || item.pageName; // 显示名称
+                pageNameSelect.appendChild(option);
+            });
+            } else {
+            console.error('接口无数据:', result);
+            alert('未获取到岗位大类数据，请检查后端服务');
+            }
+        } catch (error) {
+            console.error('加载岗位大类失败:', error);
+            alert('加载岗位大类失败：' + error.message);
+        }
+    }
+
+    // 2. 确保页面渲染后执行加载函数
+    // 找到你项目中「渲染页面」的核心函数（比如叫render/initPage），在里面添加：
+    function render() {
+    // 原有渲染逻辑...
+    
+    // 新增：如果当前是图谱页面，加载下拉框数据
+    if (state.route === 'graphVisualization') {
+        // 延迟100ms，确保DOM已渲染完成
+        setTimeout(() => {
+        loadPageNames();
+        }, 100);
+    }
+    }
+
+    // 3. 兼容没有render函数的情况：页面加载时直接执行
+    window.addEventListener('DOMContentLoaded', () => {
+    // 检查当前页面是否是图谱可视化页面（根据DOM判断）
+    if (document.getElementById('pageNameSelect')) {
+        loadPageNames();
+    }
+    });
+
+    function viewGraphVisualization() {
+        return `
+        <section class="card" style="max-width:none; width:100%; margin-left:calc(-20px - 1px); margin-right:calc(-20px - 1px); padding-left:20px; padding-right:20px;">
+            <h2>知识图谱可视化</h2>
+            
+            <div style="margin-top:20px; margin-bottom:20px;">
+                <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                    <label style="font-weight:600;">岗位大类名称:</label>
+                    <!-- 保留原始ID：graphPageNameSelect -->
+                    <select 
+                        id="graphPageNameSelect" 
+                        style="flex:1; min-width:200px; padding:10px 14px; border-radius:8px; border:1px solid rgba(11,27,58,.16); font-size:14px; background:#fff; cursor:pointer;"
+                    >
+                        <option value="">请选择岗位大类...</option>
+                    </select>
+                    <button 
+                        id="loadGraphBtn" 
+                        class="btn btn-primary"
+                        style="white-space:nowrap;"
+                    >
+                        🔍 加载图谱
+                    </button>
+                </div>
+            </div>
+            
+            <div id="graphLoading" style="display:none; text-align:center; padding:40px;">
+                <div style="color:var(--primary); font-size:16px;">正在加载图谱数据...</div>
+            </div>
+            
+            <div id="graphError" style="display:none; padding:16px; background:#fee2e2; border:1px solid #ef4444; border-radius:8px; color:#dc2626; margin-bottom:20px;"></div>
+            
+            <div id="graphContainer" style="width:100%; min-width:100%; height:600px; border:1px solid rgba(11,27,58,.1); border-radius:8px; background:#ffffff; position:relative; box-shadow:0 10px 30px rgba(15,23,42,.08); overflow:visible;">
+                <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); text-align:center; color:var(--muted);">
+                    <p style="font-size:16px; margin-bottom:8px;">👆 请选择岗位大类名称并点击"加载图谱"按钮</p>
+                    <p style="font-size:13px;">图谱将显示Page节点、Category节点和Skill节点之间的关系</p>
+                </div>
+            </div>
+            
+        </section>`;
+    }
+
+
+    
     function viewFavorites() {
         if (!state.user) {
             return `
@@ -1374,6 +1851,8 @@
             state.route === 'jobs' ? viewJobs() :
             state.route === 'match' ? viewMatch() :
             state.route === 'inverse' ? viewInverse() :
+            state.route === 'graph' ? viewGraphVisualization() :
+            state.route === 'kg' ? viewKnowledgeGraph() :
             state.route === 'jobDetail' ? viewJobDetail() :
             state.route === 'favorites' ? viewFavorites() :
             state.route === 'applications' ? viewApplications() :
@@ -1411,10 +1890,7 @@
     // --- Bindings ---
     function bindEventsForRoute() {
         if (state.route === 'home') {
-            const toJobs = document.querySelector('.hero [data-route="jobs"]');
-            const toMatch = document.querySelector('.hero [data-route="match"]');
-            if (toJobs) toJobs.addEventListener('click', () => navigate('jobs'));
-            if (toMatch) toMatch.addEventListener('click', () => navigate('match'));
+            initCarousel();
             const regBtn = document.getElementById('homeRegister');
             const loginBtn = document.getElementById('homeLogin');
             const authMessage = document.getElementById('homeAuthMessage');
@@ -1840,21 +2316,124 @@
                 });
             }
             
+            // 添加硬实力技能行
+            const addHardSkillBtn = document.getElementById('addHardSkillBtn');
+            if (addHardSkillBtn) {
+                addHardSkillBtn.addEventListener('click', () => {
+                    const container = document.getElementById('hardSkillsContainer');
+                    if (container) {
+                        const newRow = document.createElement('div');
+                        newRow.className = 'skill-input-row';
+                        newRow.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:8px;';
+                        newRow.innerHTML = `
+                            <input type="text" class="skill-name-input" placeholder="技能名称" style="flex:1; padding:8px 12px; border-radius:6px; border:1px solid rgba(11,27,58,.16);">
+                            <select class="skill-level-select" style="width:100px; padding:8px 12px; border-radius:6px; border:1px solid rgba(11,27,58,.16);">
+                                ${[0,1,2,3,4,5].map(l => `<option value="${l}">${l}分</option>`).join('')}
+                            </select>
+                            <button type="button" class="remove-skill-btn" style="width:32px; height:32px; border-radius:6px; border:1px solid #ef4444; background:#fee2e2; color:#dc2626; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:bold;" title="删除技能">−</button>
+                        `;
+                        container.appendChild(newRow);
+                        // 绑定删除按钮事件
+                        const removeBtn = newRow.querySelector('.remove-skill-btn');
+                        if (removeBtn) {
+                            removeBtn.addEventListener('click', () => {
+                                if (container.children.length > 1) {
+                                    newRow.remove();
+                                } else {
+                                    alert('至少需要保留一个技能输入行');
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+
+            // 添加软实力技能行
+            const addSoftSkillBtn = document.getElementById('addSoftSkillBtn');
+            if (addSoftSkillBtn) {
+                addSoftSkillBtn.addEventListener('click', () => {
+                    const container = document.getElementById('softSkillsContainer');
+                    if (container) {
+                        const newRow = document.createElement('div');
+                        newRow.className = 'skill-input-row';
+                        newRow.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:8px;';
+                        newRow.innerHTML = `
+                            <input type="text" class="skill-name-input" placeholder="技能名称" style="flex:1; padding:8px 12px; border-radius:6px; border:1px solid rgba(11,27,58,.16);">
+                            <select class="skill-level-select" style="width:100px; padding:8px 12px; border-radius:6px; border:1px solid rgba(11,27,58,.16);">
+                                ${[0,1,2,3,4,5].map(l => `<option value="${l}">${l}分</option>`).join('')}
+                            </select>
+                            <button type="button" class="remove-skill-btn" style="width:32px; height:32px; border-radius:6px; border:1px solid #ef4444; background:#fee2e2; color:#dc2626; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:bold;" title="删除技能">−</button>
+                        `;
+                        container.appendChild(newRow);
+                        // 绑定删除按钮事件
+                        const removeBtn = newRow.querySelector('.remove-skill-btn');
+                        if (removeBtn) {
+                            removeBtn.addEventListener('click', () => {
+                                if (container.children.length > 1) {
+                                    newRow.remove();
+                                } else {
+                                    alert('至少需要保留一个技能输入行');
+                                }
+                            });
+                        }
+                    }
+                });
+            }
+
+            // 绑定所有删除按钮的事件（包括初始行）
+            function bindRemoveButtons() {
+                document.querySelectorAll('.remove-skill-btn').forEach(btn => {
+                    // 避免重复绑定
+                    if (btn.dataset.bound) return;
+                    btn.dataset.bound = 'true';
+                    btn.addEventListener('click', function() {
+                        const row = this.closest('.skill-input-row');
+                        const container = row?.parentElement;
+                        if (container && container.children.length > 1) {
+                            row.remove();
+                        } else {
+                            alert('至少需要保留一个技能输入行');
+                        }
+                    });
+                });
+            }
+            bindRemoveButtons();
+
             // 查询匹配岗位（使用后端API）
             const queryMatchBtn = document.getElementById('queryMatchBtn');
             if (queryMatchBtn) {
                 queryMatchBtn.addEventListener('click', async () => {
-                    const hard = (document.getElementById('hardKeywords')?.value || '').trim();
-                    const soft = (document.getElementById('softKeywords')?.value || '').trim();
+                    // 从动态行中收集硬实力技能
+                    const hardContainer = document.getElementById('hardSkillsContainer');
+                    const hardSkills = [];
+                    if (hardContainer) {
+                        hardContainer.querySelectorAll('.skill-input-row').forEach(row => {
+                            const nameInput = row.querySelector('.skill-name-input');
+                            const levelSelect = row.querySelector('.skill-level-select');
+                            const name = (nameInput?.value || '').trim();
+                            const level = parseInt(levelSelect?.value || '0', 10);
+                            if (name) {
+                                hardSkills.push({ name, level });
+                            }
+                        });
+                    }
 
-                    // 合并所有技能
-                    const allSkills = [];
-                    if (hard) {
-                        allSkills.push(...hard.split(/[，,\s]+/).map(s => s.trim()).filter(Boolean));
+                    // 从动态行中收集软实力技能
+                    const softContainer = document.getElementById('softSkillsContainer');
+                    const softSkills = [];
+                    if (softContainer) {
+                        softContainer.querySelectorAll('.skill-input-row').forEach(row => {
+                            const nameInput = row.querySelector('.skill-name-input');
+                            const levelSelect = row.querySelector('.skill-level-select');
+                            const name = (nameInput?.value || '').trim();
+                            const level = parseInt(levelSelect?.value || '0', 10);
+                            if (name) {
+                                softSkills.push({ name, level });
+                            }
+                        });
                     }
-                    if (soft) {
-                        allSkills.push(...soft.split(/[，,\s]+/).map(s => s.trim()).filter(Boolean));
-                    }
+
+                    const allSkills = [...hardSkills, ...softSkills];
 
                     if (allSkills.length === 0) {
                         alert('请输入至少一个技能');
@@ -1879,9 +2458,16 @@
                         // 优先使用后端API查询
                         if (useBackend) {
                             try {
+                                // 发送技能名称和熟练度数组
                                 const result = await apiRequest('/kg/query-skills-to-jobs', {
                                     method: 'POST',
-                                    body: JSON.stringify({ skills: allSkills })
+                                    body: JSON.stringify({ 
+                                        skills: allSkills.map(s => s.name),
+                                        skill_levels: allSkills.reduce((acc, s) => {
+                                            acc[s.name] = s.level;
+                                            return acc;
+                                        }, {})
+                                    })
                                 });
 
                                 if (result.success && result.specific_jobs && result.specific_jobs.length > 0) {
@@ -2261,6 +2847,412 @@
                 });
             }
         }
+        if (state.route === 'graph') {
+            let network = null; // 保存vis-network实例
+            
+            // 加载Page列表到下拉框
+            const pageNameSelect = document.getElementById('graphPageNameSelect');
+            if (pageNameSelect && useBackend) {
+                (async () => {
+                    try {
+                        const result = await apiRequest('/kg/pages', { method: 'GET' });
+                        if (result.success && result.pages && Array.isArray(result.pages)) {
+                            // 清空现有选项（保留第一个"请选择"选项）
+                            while (pageNameSelect.options.length > 1) {
+                                pageNameSelect.remove(1);
+                            }
+                            
+                            // 添加所有Page选项
+                            result.pages.forEach(pageName => {
+                                const option = document.createElement('option');
+                                option.value = pageName.id;
+                                option.textContent = pageName.name;
+                                pageNameSelect.appendChild(option);
+                            });
+                            
+                            console.log(`✅ 已加载 ${result.pages.length} 个岗位大类`);
+                        }
+                    } catch (error) {
+                        console.error('加载Page列表失败:', error);
+                        // 如果加载失败，添加一个提示选项
+                        const option = document.createElement('option');
+                        option.value = '';
+                        option.textContent = '加载失败，请刷新页面重试';
+                        option.disabled = true;
+                        pageNameSelect.appendChild(option);
+                    }
+                })();
+            }
+            
+            // 加载图谱按钮 & 容器元素
+            const loadGraphBtn = document.getElementById('loadGraphBtn');
+            const graphContainer = document.getElementById('graphContainer');
+            const graphLoading = document.getElementById('graphLoading');
+            const graphError = document.getElementById('graphError');
+            // graphInfo 图例区域已移除，这里不再使用
+                        
+            if (loadGraphBtn && pageNameSelect) {
+                loadGraphBtn.addEventListener('click', async () => {
+                    const pageName = pageNameSelect.value.trim();
+                    
+                    if (!pageName) {
+                        alert('请选择岗位大类名称');
+                        return;
+                    }
+                    
+                    // 如果容器元素不存在，直接报错并中止，避免读取 null.style
+                    if (!graphContainer || !graphLoading || !graphError) {
+                        console.error('Graph container or status elements not found');
+                        alert('图谱容器未正确渲染，请刷新页面后重试');
+                        return;
+                    }
+                    
+                    // 显示加载状态
+                    graphLoading.style.display = 'block';
+                    graphError.style.display = 'none';
+                    graphContainer.innerHTML = '';
+                    loadGraphBtn.disabled = true;
+                    loadGraphBtn.textContent = '加载中...';
+                    
+                    try {
+                        // 调用后端API
+                        const pageNameSelect = document.getElementById('graphPageNameSelect');
+                        const pageId = pageNameSelect.value.trim();
+                        const result = await apiRequest('/kg/graph-visualization', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json' // 显式声明JSON格式
+                            },
+                            body: JSON.stringify({ page_id: pageId })
+                        });
+                        
+                        if (result.success && result.nodes && result.edges) {
+                            // 准备vis-network数据
+                            const nodes = result.nodes.map(node => {
+                                // 根据节点类型设置不同的颜色和形状（蓝色系，类似你提供的图）
+                                let background = '#b0c4de'; // 技能：浅蓝
+                                let border = '#8ba4c8';
+                                // 使用 circle 形状，让文字居中显示在圆圈内部
+                                let shape = 'circle';
+                                let size = 22;
+                                
+                                if (node.type === 'Page') {
+                                    // IT服务节点：深蓝
+                                    background = '#0b3b8c';
+                                    border = '#082b63';
+                                    shape = 'circle';
+                                    size = 32;
+                                } else if (node.type === 'Category') {
+                                    // 软实力 / 硬实力：中蓝
+                                    background = '#295fba';
+                                    border = '#1f4b93';
+                                    shape = 'circle';
+                                    size = 28;
+                                } else if (node.type === 'Skill') {
+                                    // 其他技能节点：保持浅蓝色
+                                    background = '#d2e1f5';
+                                    border = '#afc4e6';
+                                    shape = 'circle';
+                                    size = 22;
+                                }
+                                
+                                // 根据节点大小调整字体大小，确保文字完全居中在圆圈内
+                                // vis-network中size是半径的像素值，直径 = size * 2
+                                // 为了确保文字在圆圈内且居中，字体大小应该约为节点直径的25-30%
+                                let fontSize = Math.floor(size * 0.3); // 约为节点大小的30%
+                                
+                                // 根据节点类型设置合适的字体大小
+                                if (node.type === 'Page') {
+                                    fontSize = 14; // Page节点：14px字体，32px节点
+                                } else if (node.type === 'Category') {
+                                    fontSize = 12; // Category节点：12px字体，28px节点
+                                } else {
+                                    fontSize = 10; // Skill节点：10px字体，22px节点
+                                }
+                                
+                                // 不截断标签，显示完整文字（vis-network会自动处理超出部分）
+                                let displayLabel = node.label || '';
+                                
+                                // 根据节点类型设置字体颜色
+                                let fontColor = '#1f2937'; // 默认黑色
+                                if (node.type === 'Page') {
+                                    fontColor = '#ffffff'; // Page节点：白色
+                                } else if (node.type === 'Category') {
+                                    fontColor = '#ffffff'; // Category节点（硬实力/软实力）：白色
+                                }
+                                
+                                return {
+                                    id: node.id,
+                                    label: displayLabel,
+                                    color: {
+                                        background,
+                                        border,
+                                        highlight: {
+                                            background,
+                                            border: '#1f2937'
+                                        }
+                                    },
+                                    shape,
+                                    size,
+                                    font: {
+                                        size: fontSize,
+                                        color: fontColor,
+                                        face: 'Arial, sans-serif',
+                                        align: 'center',
+                                        bold: false,
+                                        vadjust: 0 // 垂直居中
+                                    },
+                                    scaling: {
+                                        label: {
+                                            enabled: false // 禁用自动缩放，使用固定大小
+                                        }
+                                    },
+                                    widthConstraint: {
+                                        maximum: size * 1.6 // 限制标签最大宽度，确保文字在圆圈内
+                                    },
+                                    heightConstraint: {
+                                        maximum: size * 1.6 // 限制标签最大高度
+                                    },
+                                    title: `${node.type}: ${node.label}` // 完整标签显示在tooltip中
+                                };
+                            });
+                            
+                            const edges = result.edges.map(edge => {
+                                // 确定边的标签：显示权重值
+                                let edgeLabel = '';
+                                
+                                // 检查edge.label是否是数字（权重）
+                                if (edge.label && !isNaN(parseFloat(edge.label)) && isFinite(edge.label)) {
+                                    // 如果是数字字符串，直接显示（这是权重）
+                                    edgeLabel = parseFloat(edge.label).toFixed(6); // 保留6位小数
+                                } else if (edge.type === 'HAS_CATEGORY' && edge.properties && edge.properties.type != null) {
+                                    // HAS_CATEGORY关系：显示type属性（权重）
+                                    edgeLabel = parseFloat(edge.properties.type).toFixed(6);
+                                } else if (edge.type === 'HAS_SKILL' && edge.properties && edge.properties.weight != null) {
+                                    // HAS_SKILL关系：显示weight属性（权重）
+                                    edgeLabel = parseFloat(edge.properties.weight).toFixed(6);
+                                } else if (edge.properties && edge.properties.weight != null) {
+                                    // 如果properties里有weight属性，显示它
+                                    edgeLabel = parseFloat(edge.properties.weight).toFixed(6);
+                                } else if (edge.properties && edge.properties.type != null) {
+                                    // 如果properties里有type属性，显示它
+                                    edgeLabel = parseFloat(edge.properties.type).toFixed(6);
+                                }
+                                // 如果edge.label是关系类型字符串（HAS_CATEGORY或HAS_SKILL），且没有找到权重，则不显示标签
+                                
+                                return {
+                                    id: edge.id,
+                                    from: edge.from,
+                                    to: edge.to,
+                                    label: edgeLabel,
+                                    arrows: 'to',
+                                    color: {
+                                        color: '#9ca3af',
+                                        highlight: '#4b5563'
+                                    },
+                                    width: edgeLabel ? 2.2 : 1.5,
+                                    font: {
+                                        size: 9,
+                                        color: '#4b5563',
+                                        strokeWidth: 2,
+                                        strokeColor: '#ffffff',
+                                        align: 'middle'
+                                    },
+                                    smooth: {
+                                        type: 'continuous',
+                                        roundness: 0.2
+                                    }
+                                };
+                            });
+                            
+                            // 检查 vis 库是否加载
+                            if (typeof vis === 'undefined' || !vis.Network || !vis.DataSet) {
+                                throw new Error('vis-network 库未加载，请检查网络连接或CDN');
+                            }
+                            
+                            // 创建vis-network
+                            const data = {
+                                nodes: new vis.DataSet(nodes),
+                                edges: new vis.DataSet(edges)
+                            };
+                            
+                            const options = {
+                                nodes: {
+                                    borderWidth: 1.5,
+                                    shadow: {
+                                        enabled: true,
+                                        color: 'rgba(15,23,42,.25)',
+                                        size: 10,
+                                        x: 0,
+                                        y: 3
+                                    },
+                                    font: {
+                                        align: 'center'
+                                    }
+                                },
+                                edges: {
+                                    smooth: {
+                                        type: 'continuous',
+                                        roundness: 0.2
+                                    },
+                                    font: {
+                                        align: 'middle',
+                                        vadjust: 0
+                                    }
+                                },
+                                physics: {
+                                    enabled: true,
+                                    solver: 'forceAtlas2Based',
+                                    forceAtlas2Based: {
+                                        gravitationalConstant: -80,
+                                        centralGravity: 0.015, // 增加中心引力，让节点更居中
+                                        springLength: 100,
+                                        springConstant: 0.08,
+                                        damping: 0.4,
+                                        avoidOverlap: 1.2
+                                    },
+                                    stabilization: {
+                                        iterations: 200,
+                                        fit: true
+                                    },
+                                    minVelocity: 0.5,
+                                    maxVelocity: 50
+                                },
+                                interaction: {
+                                    hover: true,
+                                    tooltipDelay: 100,
+                                    zoomView: true,
+                                    dragView: true,
+                                    zoomSpeed: 1.2,
+                                    dragNodes: true,
+                                    dragViewModifier: false, // 允许在整个区域内拖动视图
+                                    selectConnectedEdges: true
+                                },
+                                layout: {
+                                    improvedLayout: true,
+                                    randomSeed: 2
+                                }
+                            };
+                            
+                            // 检查 vis 库是否加载
+                            if (typeof vis === 'undefined' || !vis.Network) {
+                                throw new Error('vis-network 库未加载，请检查网络连接或CDN');
+                            }
+                            
+                            // 清除旧的可视化
+                            if (network) {
+                                network.destroy();
+                                network = null;
+                            }
+                            
+                            // 确保容器有正确的尺寸
+                            const containerRect = graphContainer.getBoundingClientRect();
+                            if (containerRect.width === 0 || containerRect.height === 0) {
+                                console.warn('容器尺寸为0，等待容器渲染');
+                                setTimeout(() => {
+                                    if (graphContainer && graphContainer.getBoundingClientRect().width > 0) {
+                                        const rect = graphContainer.getBoundingClientRect();
+                                        network = new vis.Network(graphContainer, data, options);
+                                        // 显式设置网络大小
+                                        network.setSize(`${rect.width}px`, `${rect.height}px`);
+                                        setupNetworkEvents();
+                                    }
+                                }, 100);
+                                return;
+                            }
+                            
+                            // 创建新的可视化
+                            network = new vis.Network(graphContainer, data, options);
+                            
+                            // 显式设置网络大小，确保填满整个容器
+                            network.setSize(`${containerRect.width}px`, `${containerRect.height}px`);
+                            
+                            // 强制设置 canvas 元素的样式，确保填满容器
+                            setTimeout(() => {
+                                const canvas = graphContainer.querySelector('canvas');
+                                if (canvas) {
+                                    canvas.style.width = '100%';
+                                    canvas.style.height = '100%';
+                                    canvas.style.maxWidth = 'none';
+                                    canvas.style.maxHeight = 'none';
+                                }
+                            }, 50);
+                            
+                            // 设置网络事件处理
+                            function setupNetworkEvents() {
+                                if (!network) return;
+                                
+                                network.once('stabilizationEnd', function() {
+                                    if (network && graphContainer) {
+                                        // 确保网络大小正确
+                                        const rect = graphContainer.getBoundingClientRect();
+                                        network.setSize(`${rect.width}px`, `${rect.height}px`);
+                                        
+                                        // 延迟一下确保稳定化完全完成
+                                        setTimeout(() => {
+                                            if (network) {
+                                                network.fit({
+                                                    animation: {
+                                                        duration: 500,
+                                                        easingFunction: 'easeInOutQuad'
+                                                    },
+                                                    padding: 30,
+                                                    minZoomLevel: 0.3, // 降低最小缩放级别，允许更大的视图范围
+                                                    maxZoomLevel: 3 // 增加最大缩放级别
+                                                });
+                                            }
+                                        }, 100);
+                                    }
+                                });
+                                
+                                // 添加一些交互事件
+                                network.on('click', function(params) {
+                                    if (params.nodes.length > 0) {
+                                        const nodeId = params.nodes[0];
+                                        const node = nodes.find(n => n.id === nodeId);
+                                        if (node) {
+                                            console.log('点击节点:', node.label);
+                                        }
+                                    }
+                                });
+                                
+                                // 窗口大小变化时重新调整图谱大小
+                                const handleResize = () => {
+                                    if (network && graphContainer) {
+                                        const rect = graphContainer.getBoundingClientRect();
+                                        if (rect.width > 0 && rect.height > 0) {
+                                            network.setSize(`${rect.width}px`, `${rect.height}px`);
+                                        }
+                                    }
+                                };
+                                
+                                window.addEventListener('resize', handleResize);
+                            }
+                            
+                            // 调用事件设置函数
+                            setupNetworkEvents();
+                            
+                        } else {
+                            throw new Error(result.message || '数据格式错误');
+                        }
+                    } catch (error) {
+                        console.error('加载图谱失败:', error);
+                        graphError.style.display = 'block';
+                        graphError.textContent = `加载失败: ${error.message || '未知错误'}`;
+                        graphContainer.innerHTML = `
+                            <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); text-align:center; color:var(--danger);">
+                                <p style="font-size:16px; margin-bottom:8px;">❌ 加载失败</p>
+                                <p style="font-size:13px;">${error.message || '未知错误'}</p>
+                            </div>
+                        `;
+                    } finally {
+                        graphLoading.style.display = 'none';
+                        loadGraphBtn.disabled = false;
+                        loadGraphBtn.textContent = '🔍 加载图谱';
+                    }
+                });
+            }
+        }
         if (state.route === 'favorites') {
             const listEl = document.getElementById('favoritesList');
             if (listEl) {
@@ -2624,7 +3616,10 @@
             try {
                 const result = await apiRequest('/kg/jobs');
                 if (result.success && result.jobs && Array.isArray(result.jobs) && result.jobs.length > 0) {
-                    state.kgJobTitles = result.jobs;
+                    // 后端返回的结构为 [{ id, title, ... }]，这里只需要职位名称字符串
+                    state.kgJobTitles = result.jobs
+                        .map(j => j.title)
+                        .filter(Boolean);
                     console.log('已从知识图谱加载职位列表:', state.kgJobTitles.length, '个职位');
                 }
             } catch (error) {
