@@ -232,7 +232,7 @@
         <section class="carousel-container">
             <div class="carousel-track">
                 <div class="carousel-slide">
-                    <img src="./assets/首页1（2）.jpg" alt="首页图片1">
+                    <img src="./assets/首页1.jpg" alt="首页图片1">
                     <div class="carousel-caption">
                         <div class="carousel-title">
                             <span class="line-1">多元分析</span>
@@ -278,27 +278,27 @@
         <!-- 功能优势 -->
         <section class="features container">
             <h2 class="features-title">平台特色</h2>
-            <div class="feature-card">
+            <div class="feature-card" data-route="match">
                 <div class="feature-icon">🎯</div>
                 <h3>精准匹配</h3>
                 <p>基于岗位-技能知识图谱，量化匹配度，先看是否合适再投递。</p>
             </div>
-            <div class="feature-card">
+            <div class="feature-card" data-route="inverse">
                 <div class="feature-icon"><img src="assets/ability.png" alt="能力反推"></div>
                 <h3>能力反推</h3>
                 <p>从目标岗位反推能力清单与等级，补齐差距，明确提升路径。</p>
             </div>
-            <div class="feature-card">
+            <div class="feature-card" data-route="graph">
                 <div class="feature-icon">📈</div>
                 <h3>数据驱动</h3>
                 <p>岗位数据来自 MySQL，图谱查询由 Neo4j 提供，实时响应。</p>
             </div>
-            <div class="feature-card">
-                <div class="feature-icon">🔒</div>
-                <h3>隐私安全</h3>
-                <p>个人画像保存在本地并可同步到服务器，可随时删除与导出。</p>
+            <div class="feature-card" data-route="profile">
+                <div class="feature-icon"><img src="assets/cv.png" alt="简历定制"></div>
+                <h3>简历定制</h3>
+                <p>个人信息智能转化为格式化模板，按需导出适配多场景。</p>
             </div>
-            <div class="feature-card">
+            <div class="feature-card" data-route="inverse">
                 <div class="feature-icon"><img src="assets/AI.jpg" alt="大模型推荐"></div>
                 <h3>大模型推荐</h3>
                 <p>大模型与数据库双引擎协同，推荐能力与岗位，提供多维理由与路径。</p>
@@ -1543,11 +1543,7 @@
             state.route === 'jobs' ? viewJobs() :
             state.route === 'match' ? viewMatch() :
             state.route === 'inverse' ? viewInverse() :
-<<<<<<< HEAD
             state.route === 'graph' ? viewGraphVisualization() :
-=======
-            state.route === 'kg' ? viewKnowledgeGraph() :
->>>>>>> ab7f6d4097c4865aba12799824a6b79426db4030
             state.route === 'jobDetail' ? viewJobDetail() :
             state.route === 'favorites' ? viewFavorites() :
             state.route === 'applications' ? viewApplications() :
@@ -1709,6 +1705,13 @@
             if (ctaJobsBtn) {
                 ctaJobsBtn.addEventListener('click', () => navigate('jobs'));
             }
+
+            // 特色卡片跳转
+            document.querySelectorAll('.feature-card[data-route]').forEach(card => {
+                const route = card.getAttribute('data-route');
+                card.style.cursor = 'pointer';
+                card.addEventListener('click', () => navigate(route));
+            });
         }
         if (state.route === 'profile') {
             // 照片上传

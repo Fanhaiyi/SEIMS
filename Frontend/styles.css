@@ -10,13 +10,14 @@
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html, body { height: 79%; }
 body {
     margin: 0;
     font-family: 'Inter', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
     color: var(--text);
-    background: radial-gradient(1200px 600px at 80% -10%, rgba(11,181,255,.18), transparent 60%),
-                radial-gradient(900px 500px at 10% 10%, rgba(43,102,255,.15), transparent 60%),
+
+    background: radial-gradient(1900px 1120px at 80% calc(-10% - 50px + 20%), rgba(11,181,255,.18), transparent 60%),
+                radial-gradient(900px 700px at 10% calc(10% - 50px + 20%), rgba(43,102,255,.15), transparent 60%),
                 var(--bg);
 }
 
@@ -251,10 +252,13 @@ body {
 }
 
 .carousel-slide:nth-child(3) .carousel-caption {
-    right: calc(50%);
+    right: calc(50%); 
 }
 
-/* 第二屏：中英并排布局 */
+.carousel-slide:nth-child(1) .carousel-caption {
+    right: calc(8%);
+}
+
 .caption-2 {
     display: flex;
     flex-direction: column;
