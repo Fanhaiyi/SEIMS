@@ -29,6 +29,226 @@
         }
     }
 
+    // 全局变量：存储vis-network实例
+    let network = null;
+
+    // 加载岗位大类下拉框（核心：用原始ID graphPageNameSelect）
+    async function loadPageNames() {
+        console.log('=== 开始加载岗位大类数据 ===');
+        try {
+            // 调用后端接口
+            const result = await apiRequest('/kg/pages');
+            console.log('后端返回原始数据:', JSON.stringify(result));
+
+            if (result.success && result.pages && result.pages.length > 0) {
+                // 用原始ID获取下拉框
+                const pageNameSelect = document.getElementById('graphPageNameSelect');
+                if (!pageNameSelect) {
+                    console.error('未找到下拉框元素（ID: graphPageNameSelect）');
+                    return;
+                }
+
+                // 清空下拉框，保留默认选项
+                pageNameSelect.innerHTML = '<option value="">请选择岗位大类...</option>';
+
+                // 填充岗位大类选项（修复[object Object]问题）
+                orEach(item => {
+                    // 优先取后端返回的名称字段（根据实际接口返回调整，以下是兼容写法）
+                    const optionText = item.name || item.pageName || item.title || '未命名岗位';
+                    const optionValue = item.id || item.pageId || item.title;
+
+                    console.log('填充选项：', optionValue, optionText);
+
+                    const option = document.createElement('option');
+                    option.value = optionValue;
+                    option.textContent = optionText; // 赋值文字，不是对象
+                    pageNameSelect.appendChild(option);
+                });
+
+                console.log('下拉框填充完成，当前选项数：', pageNameSelect.options.length);
+            } else {
+                console.error('后端返回数据异常:', result);
+                alert('未获取到岗位大类数据，请检查后端服务');
+            }
+        } catch (error) {
+            console.error('加载岗位大类失败:', error);
+            alert('加载岗位大类失败：' + error.message);
+        }
+    }
+
+    // 检查vis-network库是否加载完成
+    function checkVisLoaded() {
+        return new Promise((resolve, reject) => {
+            const check = () => {
+                if (typeof vis !== 'undefined' && vis.Network && vis.DataSet) {
+                    resolve();
+                } else {
+                    if (check.count < 5) {
+                        check.count++;
+                        setTimeout(check, 500);
+                    } else {
+                        reject(new Error('vis-network库加载超时'));
+                    }
+                }
+            };
+            check.count = 0;
+            check();
+        });
+    }
+
+    // 图谱渲染核心逻辑
+    function initGraphRender() {
+        const loadGraphBtn = document.getElementById('loadGraphBtn');
+        const graphPageNameSelect = document.getElementById('graphPageNameSelect');
+        const graphContainer = document.getElementById('graphContainer');
+        const graphLoading = document.getElementById('graphLoading');
+        const graphError = document.getElementById('graphError');
+
+        if (!loadGraphBtn || !graphPageNameSelect || !graphContainer) {
+            console.error('图谱核心元素缺失');
+            return;
+        }
+
+        // 绑定加载图谱按钮点击事件
+        loadGraphBtn.addEventListener('click', async () => {
+            const pageId = graphPageNameSelect.value.trim();
+            if (!pageId) {
+                alert('请选择岗位大类');
+                return;
+            }
+
+            // 重置状态
+            graphLoading.style.display = 'block';
+            graphError.style.display = 'none';
+            graphContainer.innerHTML = '';
+            loadGraphBtn.disabled = true;
+            loadGraphBtn.textContent = '加载中...';
+
+            try {
+                // 1. 检查vis库
+                await checkVisLoaded();
+
+                // 2. 调用后端图谱接口
+                const result = await apiRequest('/-visualization', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pageName: pageId })
+                });
+
+                if (!result.success || !result.nodes || !result.edges) {
+                    throw new Error(result.message || '图谱数据格式错误');
+                }
+
+                // 3. 格式化节点
+                const nodes = result.nodes.map(node => {
+                    let background = '#d2e1f5', border = '#afc4e6', shape = 'circle', size = 22;
+                    let fontColor = '#1f2937', fontSize = 10;
+
+                    if (node.type === 'Page') {
+                        background = '#0b3b8c';
+                        border = '#082b63';
+                        size = 32;
+                        fontColor = '#ffffff';
+                        fontSize = 14;
+                    } else if (node.type === 'Category') {
+                        background = '#295fba';
+                        border = '#1f4b93';
+                        size = 28;
+                        fontColor = '#ffffff';
+                        fontSize = 12;
+                    }
+
+                    return {
+                        id: node.id,
+                        label: node.label || '',
+                        color: {
+                            background,
+                            border,
+                            highlight: { background, border: '#1f2937' }
+                        },
+                        shape,
+                        size,
+                        font: { size: fontSize, color: fontColor, align: 'center' },
+                        scaling: { label: { enabled: false } },
+                        title: `${node.type}: ${node.label}`
+                    };
+                });
+
+                // 4. 格式化边
+                const edges = result.edges.map(edge => {
+                    let edgeLabel = '';
+                    if (edge.label && !isNaN(parseFloat(edge.label))) {
+                        edgeLabel = parseFloat(edge.label).toFixed(2);
+                    }
+
+                    return {
+                        id: edge.id,
+                        from: edge.from,
+                        to: edge.to,
+                        label: edgeLabel,
+                        arrows: 'to',
+                        color: { color: '#9ca3af', highlight: '#4b5563' },
+                        width: edgeLabel ? 2.2 : 1.5,
+                        font: { size: 9, color: '#4b5563', strokeWidth: 2, strokeColor: '#ffffff' },
+                        smooth: { type: 'continuous', roundness: 0.2 }
+                    };
+                });
+
+                // 5. 渲染图谱
+                const data = {
+                    nodes: new vis.DataSet(nodes),
+                    edges: new vis.DataSet(edges)
+                };
+
+                const options = {
+                    nodes: { borderWidth: 1.5, shadow: { enabled: true, color: 'rgba(15,23,42,.25)', size: 10 } },
+                    edges: { smooth: { type: 'continuous' } },
+                    physics: {
+                        solver: 'forceAtlas2Based',
+                        forceAtlas2Based: { gravitationalConstant: -80, centralGravity: 0.015, springLength: 100 },
+                        stabilization: { iterations: 200 }
+                    },
+                    interaction: { hover: true, dragView: true, zoomView: true },
+                    layout: { improvedLayout: true }
+                };
+
+                // 销毁旧实例
+                if (network) network.destroy();
+
+                // 强制设置容器尺寸
+                graphContainer.style.width = '100%';
+                graphContainer.style.height = '600px';
+                const rect = graphContainer.getBoundingClientRect();
+
+                // 创建新实例
+                network = new vis.Network(graphContainer, data, options);
+                network.setSize(`${rect.width}px`, `${rect.height}px`);
+
+                // 稳定化后自适应
+                network.once('stabilizationEnd', () => {
+                    network.fit({ padding: 30, animation: { duration: 500 } });
+                });
+
+            } catch (error) {
+                console.error('图谱加载失败:', error);
+                graphError.style.display = 'block';
+                graphError.textContent = `加载失败: ${error.message}`;
+                graphContainer.innerHTML = `
+                    <div style="position:absolute; top:50%; left:50%; transform:translate(-50%, -50%); text-align:center; color:#dc2626;">
+                        <p>❌ 图谱加载失败</p>
+                        <p style="font-size:13px; margin-top:8px;">${error.message || '未知错误'}</p>
+                    </div>
+                `;
+            } finally {
+                graphLoading.style.display = 'none';
+                loadGraphBtn.disabled = false;
+                loadGraphBtn.textContent = '🔍 加载图谱';
+            }
+        });
+    }
+
+
+
     // --- API Helper Functions ---
     async function apiRequest(endpoint, options = {}) {
         try {
@@ -135,20 +355,43 @@
     // 从后端加载技能选项（岗位到能力知识图谱）
     async function loadSkillOptionsFromBackend() {
         try {
+            // 路径保持 /kg/skills（apiRequest 内部补充 /api 前缀）
             const data = await apiRequest('/kg/skills', { method: 'GET' });
-            if (data && (data.hard_skills || data.soft_skills)) {
-                state.hardSkillOptions = data.hard_skills || [];
-                state.softSkillOptions = data.soft_skills || [];
-                console.log('✅ 从知识图谱加载技能列表成功:', state.hardSkillOptions.length, state.softSkillOptions.length);
-                return;
+            
+            // 优化1：优先判断后端返回的 success 字段（对齐接口文档）
+            if (!data?.success) {
+                console.warn('⚠️ 技能列表接口返回失败:', data?.message || '无失败原因');
+                throw new Error('接口返回 success: false');
             }
-            console.warn('⚠️ 技能列表接口返回为空，使用默认技能集合');
+
+            // 优化2：严格按文档解析 hard_skills/soft_skills，兼容空数组
+            const hardSkills = data.hard_skills || [];
+            const softSkills = data.soft_skills || [];
+            
+            // 优化3：区分“数据为空”和“接口成功但无数据”
+            if (hardSkills.length === 0 && softSkills.length === 0) {
+                console.warn('⚠️ 技能列表接口返回为空，使用默认技能集合');
+            } else {
+                state.hardSkillOptions = hardSkills;
+                state.softSkillOptions = softSkills;
+                console.log('✅ 从知识图谱加载技能列表成功:', hardSkills.length, '个硬技能,', softSkills.length, '个软技能');
+                return; // 成功加载则跳过兜底逻辑
+            }
         } catch (e) {
-            console.warn('⚠️ 获取技能列表失败，使用默认技能集合:', e.message);
+            // 优化4：细分错误类型，便于调试
+            if (e.message.includes('404')) {
+                console.error('❌ 技能列表接口404：请检查后端路由配置');
+            } else if (e.message.includes('503')) {
+                console.error('❌ 知识图谱服务不可用：请检查FastAPI是否启动');
+            } else {
+                console.warn('⚠️ 获取技能列表失败，使用默认技能集合:', e.message);
+            }
         }
-        // 出现任何异常时，使用静态技能集合作为兜底
+
+        // 兜底逻辑：使用静态技能集合，并打印兜底信息
         state.hardSkillOptions = skillsUniverse;
         state.softSkillOptions = [];
+        console.log('🔧 已启用默认技能集合，数量:', skillsUniverse.length);
     }
 
     // 异步加载技能选项（不阻塞后续渲染）
@@ -189,6 +432,10 @@
     function navigate(route) {
         state.route = route;
         render();
+
+        if (route === 'graphVisualization') {
+            setTimeout(loadPageNames, 100); // 延迟100ms确保DOM已渲染
+        }
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
@@ -232,7 +479,7 @@
         <section class="carousel-container">
             <div class="carousel-track">
                 <div class="carousel-slide">
-                    <img src="./assets/首页1.jpg" alt="首页图片1">
+                    <img src="./assets/homepage1.jpg" alt="首页图片1">
                     <div class="carousel-caption">
                         <div class="carousel-title">
                             <span class="line-1">多元分析</span>
@@ -243,7 +490,7 @@
                     </div>
                 </div>
                 <div class="carousel-slide">
-                    <img src="./assets/首页2.jpg" alt="首页图片2" class="carousel-img-top">
+                    <img src="./assets/homepage2.jpg" alt="首页图片2" class="carousel-img-top">
                     <div class="carousel-caption caption-2">
                         <div class="caption-line">
                             <span class="cn">海量岗位</span>
@@ -257,7 +504,7 @@
                     </div>
                 </div>
                 <div class="carousel-slide">
-                    <img src="./assets/首页3.jpg" alt="首页图片3" class="carousel-img-top">
+                    <img src="./assets/homepage3.jpg" alt="首页图片3" class="carousel-img-top">
                     <div class="carousel-caption">
                         <div class="carousel-title">
                             <span class="line-1">图谱赋能</span>
@@ -653,7 +900,7 @@
         </section>`;
     }
 
-    function skillInputRow(category, index, skillName = '', level = 3) {
+    function skillInputRowForMatch(category, index, skillName = '', level = 3) {
         const containerId = category === 'hard' ? 'hardSkillsContainer' : 'softSkillsContainer';
         return `
         <div class="skill-input-row" style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
@@ -684,14 +931,14 @@
                 <div class="col-6">
                     <label>我的硬实力</label>
                     <div id="hardSkillsContainer" style="margin-bottom:8px;">
-                        ${skillInputRow('hard', 0)}
+                        ${skillInputRowForMatch('hard', 0)}
                     </div>
                     <button type="button" class="btn btn-outline" id="addHardSkillBtn" style="font-size:13px; padding:6px 12px;">+ 添加硬实力</button>
                 </div>
                 <div class="col-6">
                     <label>我的软实力</label>
                     <div id="softSkillsContainer" style="margin-bottom:8px;">
-                        ${skillInputRow('soft', 0)}
+                        ${skillInputRowForMatch('soft', 0)}
                     </div>
                     <button type="button" class="btn btn-outline" id="addSoftSkillBtn" style="font-size:13px; padding:6px 12px;">+ 添加软实力</button>
                 </div>
@@ -802,201 +1049,423 @@
         const hasUnknownSkills = unknownSkills.length > 0;
         
         return `
-        <section class="card">
-            <h2>岗位 → 能力推荐</h2>
-            <p class="muted">输入职位名称，系统将为您展示该职位所需的所有技能要求。</p>
-            
-            <h3 style="margin-top:24px;">📝 输入职位名称</h3>
-            <div style="display:flex; gap:12px; margin-bottom:20px;">
-                <div style="flex:1;">
-                    <input type="text" id="jobNameInput" placeholder="例如：前端工程师、后端工程师、数据分析师" 
-                           list="jobTitlesList" 
-                           value="${currentJobTitle}"
-                           style="width:100%; padding:12px 14px; border-radius:10px; border:1px solid rgba(11,27,58,.16);">
-                    <datalist id="jobTitlesList">
-                        ${jobTitles.map(title => `<option value="${title}">`).join('')}
-                    </datalist>
-                </div>
-                <button class="btn btn-primary" id="searchJobSkills" style="white-space:nowrap;">🔍 查询技能</button>
-            </div>
-            
-            <div id="jobSkillsResult" style="display:${hasJobData ? 'block' : 'none'};">
-                ${hasJobData ? `
-                    <div style="display:flex; align-items:center; gap:8px; margin-top:24px;">
-                        <h3 style="margin:0;">💡 职位所需技能</h3>
-                        <button id="skillLevelHelpBtn" class="help-icon-btn" title="点击查看技能等级说明" style="width:24px; height:24px; border-radius:50%; border:1px solid rgba(43,102,255,.3); background:#eaf6ff; color:var(--primary); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; transition:all .2s;">
-                            ?
-                        </button>
+            <section class="card">
+                <h2>岗位 → 能力推荐</h2>
+                <p class="muted">输入职位名称，系统将为您展示该职位所需的所有技能要求。</p>
+                
+                <h3 style="margin-top:24px;">📝 输入职位名称</h3>
+                <div style="display:flex; gap:12px; margin-bottom:20px;">
+                    <div style="flex:1;">
+                        <input type="text" id="jobNameInput" placeholder="例如：前端工程师、后端工程师、数据分析师" 
+                            list="jobTitlesList" 
+                            value="${currentJobTitle}"
+                            style="width:100%; padding:12px 14px; border-radius:10px; border:1px solid rgba(11,27,58,.16);">
+                        <datalist id="jobTitlesList">
+                            ${jobTitles.map(title => `<option value="${title}">`).join('')}
+                        </datalist>
                     </div>
-                    <p class="muted">岗位「${currentJobTitle}」的技能要求：</p>
-                    ${hasUnknownSkills && isKgSource ? `
-                        <div class="alert alert-info" style="margin:12px 0; padding:12px; background:#fef3c7; color:#92400e; border-radius:8px; border:1px solid #f59e0b;">
-                            ⚠️ <strong>警告：</strong>以下技能缺少分类信息：${unknownSkills.join('、')}。请检查数据库中的分类设置。
+                    <button class="btn btn-primary" id="searchJobSkills" style="white-space:nowrap;">🔍 查询技能</button>
+                </div>
+                
+                <div id="jobSkillsResult" style="display:${hasJobData ? 'block' : 'none'};">
+                    ${hasJobData ? `
+                        <div style="display:flex; align-items:center; gap:8px; margin-top:24px;">
+                            <h3 style="margin:0;">💡 职位所需技能</h3>
+                            <button id="skillLevelHelpBtn" class="help-icon-btn" title="点击查看技能等级说明" style="width:24px; height:24px; border-radius:50%; border:1px solid rgba(43,102,255,.3); background:#eaf6ff; color:var(--primary); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; transition:all .2s;">
+                                ?
+                            </button>
                         </div>
-                    ` : ''}
-                        ${Object.keys(skillsDisplay).length > 0 ? `
-                        <!-- 图例说明 -->
-                        <div style="display:flex; gap:16px; margin:12px 0; padding:12px; background:#f8f9fa; border-radius:8px; flex-wrap:wrap;">
-                            <div style="display:flex; align-items:center; gap:6px;">
-                                <span class="chip" style="background:linear-gradient(135deg, #e0f2fe, #bae6fd); border:1px solid #7dd3fc; color:#0c4a6e;">硬实力</span>
-                                <span style="font-size:13px; color:var(--muted);">技术技能</span>
+                        <p class="muted">岗位「${currentJobTitle}」的技能要求：</p>
+                        ${hasUnknownSkills && isKgSource ? `
+                            <div class="alert alert-info" style="margin:12px 0; padding:12px; background:#fef3c7; color:#92400e; border-radius:8px; border:1px solid #f59e0b;">
+                                ⚠️ <strong>警告：</strong>以下技能缺少分类信息：${unknownSkills.join('、')}。请检查数据库中的分类设置。
                             </div>
-                            <div style="display:flex; align-items:center; gap:6px;">
-                                <span class="chip" style="background:linear-gradient(135deg, #dcfce7, #bbf7d0); border:1px solid #86efac; color:#14532d;">软实力</span>
-                                <span style="font-size:13px; color:var(--muted);">通用能力</span>
-                            </div>
-                            <div style="font-size:12px; color:var(--muted); margin-left:auto;">
-                                共 ${hardSkills.length} 项硬实力，${softSkills.length} 项软实力
-                            </div>
-                        </div>
-                    ` : ''}
-                    <div style="margin:16px 0;">
-                        ${Object.keys(skillsDisplay).length > 0 ? `
-                            <div class="skills-columns" style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
-                                <!-- 硬实力列 -->
-                                <div style="padding:16px; background:#f8f9fa; border-radius:10px; border-left:4px solid #3b82f6;">
-                                    <h4 style="margin:0 0 12px 0; color:#1e40af; font-size:15px; display:flex; align-items:center; gap:6px;">
-                                        <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:linear-gradient(135deg, #e0f2fe, #bae6fd); border:2px solid #7dd3fc;"></span>
-                                        硬实力（${hardSkills.length}项）
-                                    </h4>
-                                    ${hardSkills.length > 0 ? `
-                            <div style="display:flex; flex-wrap:wrap; gap:8px;">
-                                            ${hardSkills.map(skill => `
-                                                <span class="chip" style="${getSkillChipStyle(skill, skillsDisplay[skill], skillsCategoryMap[skill])}">
-                                                    ${skill} <strong>Lv.${skillsDisplay[skill]}</strong>
-                                    </span>
-                                `).join('')}
-                                        </div>
-                                    ` : '<div style="color:var(--muted); font-size:13px; padding:8px;">暂无硬实力要求</div>'}
+                        ` : ''}
+                            ${Object.keys(skillsDisplay).length > 0 ? `
+                            <!-- 图例说明 -->
+                            <div style="display:flex; gap:16px; margin:12px 0; padding:12px; background:#f8f9fa; border-radius:8px; flex-wrap:wrap;">
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <span class="chip" style="background:linear-gradient(135deg, #e0f2fe, #bae6fd); border:1px solid #7dd3fc; color:#0c4a6e;">硬实力</span>
+                                    <span style="font-size:13px; color:var(--muted);">技术技能</span>
                                 </div>
-                                
-                                <!-- 软实力列 -->
-                                <div style="padding:16px; background:#f8f9fa; border-radius:10px; border-left:4px solid #10b981;">
-                                    <h4 style="margin:0 0 12px 0; color:#065f46; font-size:15px; display:flex; align-items:center; gap:6px;">
-                                        <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:linear-gradient(135deg, #dcfce7, #bbf7d0); border:2px solid #86efac;"></span>
-                                        软实力（${softSkills.length}项）
-                                    </h4>
-                                    ${softSkills.length > 0 ? `
-                                        <div style="display:flex; flex-wrap:wrap; gap:8px;">
-                                            ${softSkills.map(skill => `
-                                                <span class="chip" style="${getSkillChipStyle(skill, skillsDisplay[skill], skillsCategoryMap[skill])}">
-                                                    ${skill} <strong>Lv.${skillsDisplay[skill]}</strong>
+                                <div style="display:flex; align-items:center; gap:6px;">
+                                    <span class="chip" style="background:linear-gradient(135deg, #dcfce7, #bbf7d0); border:1px solid #86efac; color:#14532d;">软实力</span>
+                                    <span style="font-size:13px; color:var(--muted);">通用能力</span>
+                                </div>
+                                <div style="font-size:12px; color:var(--muted); margin-left:auto;">
+                                    共 ${hardSkills.length} 项硬实力，${softSkills.length} 项软实力
+                                </div>
+                            </div>
+                        ` : ''}
+                        <div style="margin:16px 0;">
+                            ${Object.keys(skillsDisplay).length > 0 ? `
+                                <div class="skills-columns" style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+                                    <!-- 硬实力列 -->
+                                    <div style="padding:16px; background:#f8f9fa; border-radius:10px; border-left:4px solid #3b82f6;">
+                                        <h4 style="margin:0 0 12px 0; color:#1e40af; font-size:15px; display:flex; align-items:center; gap:6px;">
+                                            <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:linear-gradient(135deg, #e0f2fe, #bae6fd); border:2px solid #7dd3fc;"></span>
+                                            硬实力（${hardSkills.length}项）
+                                        </h4>
+                                        ${hardSkills.length > 0 ? `
+                                <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                                                ${hardSkills.map(skill => `
+                                                    <span class="chip" style="${getSkillChipStyle(skill, skillsDisplay[skill], skillsCategoryMap[skill])}">
+                                                        ${skill} <strong>Lv.${skillsDisplay[skill]}</strong>
+                                        </span>
+                                    `).join('')}
+                                            </div>
+                                        ` : '<div style="color:var(--muted); font-size:13px; padding:8px;">暂无硬实力要求</div>'}
+                                    </div>
+                                    
+                                    <!-- 软实力列 -->
+                                    <div style="padding:16px; background:#f8f9fa; border-radius:10px; border-left:4px solid #10b981;">
+                                        <h4 style="margin:0 0 12px 0; color:#065f46; font-size:15px; display:flex; align-items:center; gap:6px;">
+                                            <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:linear-gradient(135deg, #dcfce7, #bbf7d0); border:2px solid #86efac;"></span>
+                                            软实力（${softSkills.length}项）
+                                        </h4>
+                                        ${softSkills.length > 0 ? `
+                                            <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                                                ${softSkills.map(skill => `
+                                                    <span class="chip" style="${getSkillChipStyle(skill, skillsDisplay[skill], skillsCategoryMap[skill])}">
+                                                        ${skill} <strong>Lv.${skillsDisplay[skill]}</strong>
+                                                    </span>
+                                                `).join('')}
+                                            </div>
+                                        ` : '<div style="color:var(--muted); font-size:13px; padding:8px;">暂无软实力要求</div>'}
+                                    </div>
+                                </div>
+                            ` : '<div class="empty">该职位暂无技能要求数据</div>'}
+                        </div>
+                        ${selectedJob ? `
+                            <div style="margin-top:16px;">
+                                <h4 style="margin-bottom:8px;">岗位详情</h4>
+                                <p><strong>公司：</strong>${selectedJob.company}</p>
+                                <p><strong>城市：</strong>${selectedJob.city}</p>
+                                <p><strong>描述：</strong>${selectedJob.desc}</p>
+                            </div>
+                        ` : ''}
+                        ${state.profile && Object.keys(state.profile.skills || {}).length > 0 && Object.keys(skillsDisplay).length > 0 ? `
+                            <h3 style="margin-top:24px;">📊 技能对比分析</h3>
+                            ${(() => {
+                                const missing = diffSkills(state.profile.skills, skillsDisplay);
+                                return missing.length > 0 ? `
+                                    <div style="margin-top:12px;">
+                                        <p class="muted">您还需要提升以下技能：</p>
+                                        <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">
+                                            ${missing.map(m => `
+                                                <span class="chip" style="${getSkillChipStyle(m.skill, m.required, skillsCategoryMap[m.skill])} opacity:0.9;">
+                                                    ${m.skill} 需≥Lv.${m.required}（您当前：${m.current || 0}）
                                                 </span>
                                             `).join('')}
                                         </div>
-                                    ` : '<div style="color:var(--muted); font-size:13px; padding:8px;">暂无软实力要求</div>'}
+                                    </div>
+                                ` : '<div class="empty" style="margin-top:12px;">✅ 恭喜！您的技能满足该岗位要求</div>';
+                            })()}
+                        ` : ''}
+                        
+                        <!-- 新增：豆包对话接口调用区域 -->
+                        <div style="margin-top:32px; padding-top:24px; border-top:1px solid rgba(11,27,58,.08);">
+                            <h3 style="margin:0 0 16px 0;">🤖 智能职业分析（豆包）</h3>
+                            <p class="muted" style="margin-bottom:16px; font-size:13px;">基于当前岗位技能要求，获取AI专业分析建议</p>
+                            
+                            <!-- 对话输入区域 -->
+                            <div style="display:flex; gap:12px; margin-bottom:16px;">
+                                <div style="flex:1; position:relative;">
+                                    <textarea 
+                                        id="doubaoQuestionInput" 
+                                        placeholder="系统将自动填入「${currentJobTitle} 职位所需技能」，也可自定义提问..." 
+                                        style="width:100%; min-height:80px; padding:12px 14px; border-radius:10px; border:1px solid rgba(11,27,58,.16); resize:vertical; font-size:14px; line-height:1.5;"
+                                    >${currentJobTitle} 职位所需技能</textarea>
+                                    <span style="position:absolute; right:12px; bottom:12px; font-size:11px; color:var(--muted);">支持自定义提问</span>
+                                </div>
+                                <div style="display:flex; flex-direction:column; gap:8px;">
+                                    <button id="sendDoubaoQuery" class="btn btn-primary" style="white-space:nowrap; padding:0 16px; height:40px;">📤 发送查询</button>
+                                    <button id="resetDoubaoInput" class="btn btn-outline" style="white-space:nowrap; padding:0 16px; height:40px; font-size:13px;">🔄 重置</button>
                                 </div>
                             </div>
-                        ` : '<div class="empty">该职位暂无技能要求数据</div>'}
-                    </div>
-                    ${selectedJob ? `
-                        <div style="margin-top:16px;">
-                            <h4 style="margin-bottom:8px;">岗位详情</h4>
-                            <p><strong>公司：</strong>${selectedJob.company}</p>
-                            <p><strong>城市：</strong>${selectedJob.city}</p>
-                            <p><strong>描述：</strong>${selectedJob.desc}</p>
+                            
+                            <!-- 加载状态 -->
+                            <div id="doubaoLoading" style="display:none; text-align:center; padding:20px;">
+                                <div style="width:32px; height:32px; border:3px solid rgba(43,102,255,.2); border-radius:50%; border-top-color:var(--primary); animation: spin 1s linear infinite; margin:0 auto;"></div>
+                                <p style="margin-top:12px; color:var(--muted); font-size:13px;">正在请求豆包AI分析...</p>
+                                <style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }</style>
+                            </div>
+                            
+                            <!-- 回复结果区域 -->
+                            <div id="doubaoResult" style="display:none; margin-top:16px; padding:16px; background:#f8f9fa; border-radius:10px; line-height:1.6;">
+                                <div style="display:flex; align-items:flex-start; gap:8px; margin-bottom:12px;">
+                                    <span style="display:inline-block; width:28px; height:28px; border-radius:50%; background:#3b82f6; color:white; text-align:center; line-height:28px; font-size:14px; font-weight:bold;">AI</span>
+                                    <h4 style="margin:0; color:#1e40af; font-size:15px;">豆包AI分析结果</h4>
+                                </div>
+                                <div id="doubaoAnswerContent" style="color:#333; font-size:14px; white-space:pre-wrap;"></div>
+                            </div>
+                            
+                            <!-- 空状态 -->
+                            <div id="doubaoEmpty" style="display:block; text-align:center; padding:20px; color:var(--muted); font-size:13px;">
+                                <p>点击「发送查询」按钮，获取AI专业分析建议</p>
+                                <p style="margin-top:8px;">💡 可提问：如何提升该岗位所需技能、该岗位职业发展路径等</p>
+                            </div>
                         </div>
+                        
+                        ${selectedJob ? `
+                            <div style="margin-top:20px;">
+                                <button class="btn btn-outline" data-job="${selectedJob.id}" data-action="detail">查看岗位详情</button>
+                            </div>
+                        ` : ''}
                     ` : ''}
-                    ${state.profile && Object.keys(state.profile.skills || {}).length > 0 && Object.keys(skillsDisplay).length > 0 ? `
-                        <h3 style="margin-top:24px;">📊 技能对比分析</h3>
-                        ${(() => {
-                            const missing = diffSkills(state.profile.skills, skillsDisplay);
-                            return missing.length > 0 ? `
-                                <div style="margin-top:12px;">
-                                    <p class="muted">您还需要提升以下技能：</p>
-                                    <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">
-                                        ${missing.map(m => `
-                                            <span class="chip" style="${getSkillChipStyle(m.skill, m.required, skillsCategoryMap[m.skill])} opacity:0.9;">
-                                                ${m.skill} 需≥Lv.${m.required}（您当前：${m.current || 0}）
-                                            </span>
-                                        `).join('')}
+                </div>
+                
+                <div id="jobSkillsEmpty" style="display:${hasJobData ? 'none' : 'block'}; margin-top:32px;">
+                    <div class="empty">
+                        <p>👆 请在上方输入职位名称，然后点击"查询技能"按钮</p>
+                        <p class="muted" style="margin-top:8px; font-size:13px;">✨ 智能匹配，精准推荐，助您找到理想岗位</p>
+                        <p class="muted" style="margin-top:8px; font-size:13px;">🚀 实时数据，权威分析，让职业规划更清晰</p>
+                    </div>
+                </div>
+                
+                <!-- 技能等级说明模态框 -->
+                <div id="skillLevelModal" class="modal-overlay" style="display:none;">
+                    <div class="modal-content">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                            <h3 style="margin:0; color:var(--primary);">📊 技能等级说明</h3>
+                            <button id="closeSkillLevelModal" class="modal-close-btn" style="width:32px; height:32px; border-radius:50%; border:none; background:#f0f0f0; color:#666; cursor:pointer; font-size:20px; display:flex; align-items:center; justify-content:center; transition:all .2s;">&times;</button>
+                        </div>
+                        <div style="line-height:1.8;">
+                            <p class="muted" style="margin-bottom:16px;">技能等级（Lv.）表示该岗位对各项技能的要求程度，范围是 <strong>0-5级</strong>：</p>
+                            <div style="padding:12px; background:#eff6ff; border-radius:8px; border-left:4px solid #3b82f6; margin-bottom:16px;">
+                                <p style="margin:0; font-size:13px; color:#1e40af; line-height:1.6;">
+                                    <strong>📌 等级划分依据：</strong><br>
+                                    技能等级来源于知识图谱数据库中职位与技能之间关系的<strong>权重值（weight）</strong>。
+                                    权重值反映了该技能在该岗位中的重要程度，系统会根据以下规则将权重值转换为等级：<br>
+                                    • 如果权重值在 0-1 范围内：等级 = 权重 × 10（映射到1-10级）<br>
+                                    • 如果权重值 ≥ 1：等级 = min(权重值, 10)（直接取整数，最高10级）<br>
+                                    • 最终显示的等级范围会根据实际数据调整，通常为 1-5 级<br><br>
+                                    <strong>权重越高，等级越高</strong>，表示该技能对该岗位越重要。
+                                </p>
+                            </div>
+                            <div style="display:grid; gap:12px;">
+                                <div style="padding:12px; background:#f8f9fa; border-radius:8px; border-left:4px solid #94a3b8;">
+                                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                                        <span style="font-weight:bold; color:#475569; min-width:50px;">Lv.0</span>
+                                        <span>不需要</span>
                                     </div>
                                 </div>
-                            ` : '<div class="empty" style="margin-top:12px;">✅ 恭喜！您的技能满足该岗位要求</div>';
-                        })()}
-                    ` : ''}
-                    ${selectedJob ? `
-                        <div style="margin-top:20px;">
-                            <button class="btn btn-outline" data-job="${selectedJob.id}" data-action="detail">查看岗位详情</button>
-                        </div>
-                    ` : ''}
-                ` : ''}
-            </div>
-            
-            <div id="jobSkillsEmpty" style="display:${hasJobData ? 'none' : 'block'}; margin-top:32px;">
-                <div class="empty">
-                    <p>👆 请在上方输入职位名称，然后点击"查询技能"按钮</p>
-                    <p class="muted" style="margin-top:8px; font-size:13px;">✨ 智能匹配，精准推荐，助您找到理想岗位</p>
-                    <p class="muted" style="margin-top:8px; font-size:13px;">🚀 实时数据，权威分析，让职业规划更清晰</p>
-                </div>
-            </div>
-            
-            <!-- 技能等级说明模态框 -->
-            <div id="skillLevelModal" class="modal-overlay" style="display:none;">
-                <div class="modal-content">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                        <h3 style="margin:0; color:var(--primary);">📊 技能等级说明</h3>
-                        <button id="closeSkillLevelModal" class="modal-close-btn" style="width:32px; height:32px; border-radius:50%; border:none; background:#f0f0f0; color:#666; cursor:pointer; font-size:20px; display:flex; align-items:center; justify-content:center; transition:all .2s;">&times;</button>
-                    </div>
-                    <div style="line-height:1.8;">
-                        <p class="muted" style="margin-bottom:16px;">技能等级（Lv.）表示该岗位对各项技能的要求程度，范围是 <strong>0-5级</strong>：</p>
-                        <div style="padding:12px; background:#eff6ff; border-radius:8px; border-left:4px solid #3b82f6; margin-bottom:16px;">
-                            <p style="margin:0; font-size:13px; color:#1e40af; line-height:1.6;">
-                                <strong>📌 等级划分依据：</strong><br>
-                                技能等级来源于知识图谱数据库中职位与技能之间关系的<strong>权重值（weight）</strong>。
-                                权重值反映了该技能在该岗位中的重要程度，系统会根据以下规则将权重值转换为等级：<br>
-                                • 如果权重值在 0-1 范围内：等级 = 权重 × 10（映射到1-10级）<br>
-                                • 如果权重值 ≥ 1：等级 = min(权重值, 10)（直接取整数，最高10级）<br>
-                                • 最终显示的等级范围会根据实际数据调整，通常为 1-5 级<br><br>
-                                <strong>权重越高，等级越高</strong>，表示该技能对该岗位越重要。
+                                <div style="padding:12px; background:#f8f9fa; border-radius:8px; border-left:4px solid #60a5fa;">
+                                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                                        <span style="font-weight:bold; color:#3b82f6; min-width:50px;">Lv.1</span>
+                                        <span>基础/入门级别</span>
+                                    </div>
+                                </div>
+                                <div style="padding:12px; background:#f8f9fa; border-radius:8px; border-left:4px solid #3b82f6;">
+                                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                                        <span style="font-weight:bold; color:#2563eb; min-width:50px;">Lv.2</span>
+                                        <span>初级级别</span>
+                                    </div>
+                                </div>
+                                <div style="padding:12px; background:#f8f9fa; border-radius:8px; border-left:4px solid #2563eb;">
+                                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                                        <span style="font-weight:bold; color:#1d4ed8; min-width:50px;">Lv.3</span>
+                                        <span>中级级别（默认等级）</span>
+                                    </div>
+                                </div>
+                                <div style="padding:12px; background:#f8f9fa; border-radius:8px; border-left:4px solid #1d4ed8;">
+                                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                                        <span style="font-weight:bold; color:#1e40af; min-width:50px;">Lv.4</span>
+                                        <span>高级级别</span>
+                                    </div>
+                                </div>
+                                <div style="padding:12px; background:#f8f9fa; border-radius:8px; border-left:4px solid #1e40af;">
+                                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                                        <span style="font-weight:bold; color:#1e3a8a; min-width:50px;">Lv.5</span>
+                                        <span>专家级别</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <p class="muted" style="margin-top:20px; font-size:13px;">
+                                💡 <strong>提示：</strong>数字越大，表示该岗位对该技能的要求越高。例如，Lv.4表示需要高级技能水平，Lv.1表示只需基础了解即可。
                             </p>
                         </div>
-                        <div style="display:grid; gap:12px;">
-                            <div style="padding:12px; background:#f8f9fa; border-radius:8px; border-left:4px solid #94a3b8;">
-                                <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-                                    <span style="font-weight:bold; color:#475569; min-width:50px;">Lv.0</span>
-                                    <span>不需要</span>
-                                </div>
-                            </div>
-                            <div style="padding:12px; background:#f8f9fa; border-radius:8px; border-left:4px solid #60a5fa;">
-                                <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-                                    <span style="font-weight:bold; color:#3b82f6; min-width:50px;">Lv.1</span>
-                                    <span>基础/入门级别</span>
-                                </div>
-                            </div>
-                            <div style="padding:12px; background:#f8f9fa; border-radius:8px; border-left:4px solid #3b82f6;">
-                                <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-                                    <span style="font-weight:bold; color:#2563eb; min-width:50px;">Lv.2</span>
-                                    <span>初级级别</span>
-                                </div>
-                            </div>
-                            <div style="padding:12px; background:#f8f9fa; border-radius:8px; border-left:4px solid #2563eb;">
-                                <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-                                    <span style="font-weight:bold; color:#1d4ed8; min-width:50px;">Lv.3</span>
-                                    <span>中级级别（默认等级）</span>
-                                </div>
-                            </div>
-                            <div style="padding:12px; background:#f8f9fa; border-radius:8px; border-left:4px solid #1d4ed8;">
-                                <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-                                    <span style="font-weight:bold; color:#1e40af; min-width:50px;">Lv.4</span>
-                                    <span>高级级别</span>
-                                </div>
-                            </div>
-                            <div style="padding:12px; background:#f8f9fa; border-radius:8px; border-left:4px solid #1e40af;">
-                                <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-                                    <span style="font-weight:bold; color:#1e3a8a; min-width:50px;">Lv.5</span>
-                                    <span>专家级别</span>
-                                </div>
-                            </div>
-                        </div>
-                        <p class="muted" style="margin-top:20px; font-size:13px;">
-                            💡 <strong>提示：</strong>数字越大，表示该岗位对该技能的要求越高。例如，Lv.4表示需要高级技能水平，Lv.1表示只需基础了解即可。
-                        </p>
                     </div>
                 </div>
-            </div>
-        </section>`;
+            </section>`;
     }
+
+    // 优化后的前端调用逻辑
+    document.addEventListener('DOMContentLoaded', function() {
+        // 豆包AI查询逻辑
+        document.addEventListener('click', function(e) {
+            // 发送查询按钮点击事件
+            if (e.target.id === 'sendDoubaoQuery') {
+                const question = document.getElementById('doubaoQuestionInput').value.trim();
+                if (!question) {
+                    alert('请输入查询内容');
+                    return;
+                }
+
+                // 显示加载状态
+                const doubaoEmpty = document.getElementById('doubaoEmpty');
+                const doubaoResult = document.getElementById('doubaoResult');
+                const doubaoLoading = document.getElementById('doubaoLoading');
+                const doubaoAnswerContent = document.getElementById('doubaoAnswerContent');
+
+                doubaoEmpty.style.display = 'none';
+                doubaoResult.style.display = 'none';
+                doubaoLoading.style.display = 'block';
+                doubaoAnswerContent.textContent = ''; // 清空之前的结果
+
+                // 核心修改1：修正后端接口地址（3001端口，匹配你的后端配置）
+                const apiUrl = 'http://localhost:3001/api/doubao/chat';
+                
+                // 核心修改2：增强的fetch请求（带超时、错误处理）
+                fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        // 可选：添加CSRF令牌（如果后端需要）
+                        // 'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]')?.content || ''
+                    },
+                    body: JSON.stringify({
+                        prompt: question,
+                        systemPrompt: '你是专业的就业匹配专家，输出简洁准确、结构化的分析结果，语言口语化，便于理解'
+                    }),
+                    timeout: 30000, // 30秒超时
+                    credentials: 'same-origin' // 携带cookie（如果需要登录验证）
+                })
+                .then(response => {
+                    // 核心修改3：处理HTTP状态码错误
+                    if (!response.ok) {
+                        throw new Error(`HTTP错误：${response.status} ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // 隐藏加载状态
+                    doubaoLoading.style.display = 'none';
+                    
+                    // 核心修改4：适配后端标准响应格式
+                    if (data.success) {
+                        // 支持markdown格式换行（如果后端返回markdown）
+                        const formattedContent = data.data || data.content || '';
+                        doubaoAnswerContent.textContent = formattedContent;
+                        // 可选：如果需要支持HTML渲染
+                        // doubaoAnswerContent.innerHTML = formattedContent.replace(/\n/g, '<br>');
+                    } else {
+                        doubaoAnswerContent.textContent = `查询失败：${data.message || data.error || '未知错误'}`;
+                    }
+                    doubaoResult.style.display = 'block';
+                })
+                .catch(error => {
+                    // 隐藏加载状态
+                    doubaoLoading.style.display = 'none';
+                    
+                    // 核心修改5：分类错误提示，提升用户体验
+                    let errorMsg = '';
+                    if (error.message.includes('Failed to fetch')) {
+                        errorMsg = '网络错误：无法连接到服务器，请检查后端服务是否启动（端口3001）';
+                    } else if (error.message.includes('HTTP')) {
+                        errorMsg = `服务器错误：${error.message}`;
+                    } else {
+                        errorMsg = `查询异常：${error.message}`;
+                    }
+                    doubaoAnswerContent.textContent = errorMsg;
+                    doubaoResult.style.display = 'block';
+                    
+                    // 控制台打印详细错误，便于调试
+                    console.error('豆包接口调用错误详情：', error);
+                });
+            }
+
+            // 重置输入框逻辑（优化）
+            if (e.target.id === 'resetDoubaoInput') {
+                const jobNameInput = document.getElementById('jobNameInput');
+                const doubaoQuestionInput = document.getElementById('doubaoQuestionInput');
+                const doubaoResult = document.getElementById('doubaoResult');
+                const doubaoEmpty = document.getElementById('doubaoEmpty');
+
+                const currentJob = jobNameInput.value.trim() || '职位名称';
+                doubaoQuestionInput.value = `${currentJob} 职位所需技能`;
+                doubaoResult.style.display = 'none';
+                doubaoEmpty.style.display = 'block';
+                
+                // 清空输入框焦点
+                doubaoQuestionInput.blur();
+            }
+        });
+
+        // 技能等级说明弹窗逻辑（补充）
+        document.getElementById('skillLevelHelpBtn')?.addEventListener('click', function() {
+            document.getElementById('skillLevelModal').style.display = 'block';
+        });
+
+        document.getElementById('closeSkillLevelModal')?.addEventListener('click', function() {
+            document.getElementById('skillLevelModal').style.display = 'none';
+        });
+
+        // 点击弹窗外部关闭（补充）
+        document.getElementById('skillLevelModal')?.addEventListener('click', function(e) {
+            if (e.target === this) {
+                this.style.display = 'none';
+            }
+        });
+    });
+
+    // 1. 定义加载岗位大类的函数
+    async function loadPageNames() {
+        console.log('开始加载岗位大类数据'); // 调试日志，方便排查
+        try {
+            // 调用后端/api/kg/pages接口获取岗位大类
+            const result = await apiRequest('/kg/pages');
+            console.log('岗位大类接口返回:', result); // 打印接口数据，看是否正常
+            
+            // 只处理成功且有数据的情况
+            if (result && result.success && result.pages && result.pages.length > 0) {
+            const pageNameSelect = document.getElementById('pageNameSelect');
+            if (!pageNameSelect) {
+                console.error('找不到下拉框元素');
+                return;
+            }
+            
+            // 清空原有选项（保留默认）
+            pageNameSelect.innerHTML = '<option value="">请选择岗位大类...</option>';
+            
+            // 循环添加岗位大类选项
+            result.pages.forEach(item => {
+                const option = document.createElement('option');
+                option.value = item.id || item.pageId; // 兼容不同字段名
+                option.textContent = item.name || item.pageName; // 显示名称
+                pageNameSelect.appendChild(option);
+            });
+            } else {
+            console.error('接口无数据:', result);
+            alert('未获取到岗位大类数据，请检查后端服务');
+            }
+        } catch (error) {
+            console.error('加载岗位大类失败:', error);
+            alert('加载岗位大类失败：' + error.message);
+        }
+    }
+
+    // 2. 确保页面渲染后执行加载函数
+    // 找到你项目中「渲染页面」的核心函数（比如叫render/initPage），在里面添加：
+    function render() {
+    // 原有渲染逻辑...
+    
+    // 新增：如果当前是图谱页面，加载下拉框数据
+    if (state.route === 'graphVisualization') {
+        // 延迟100ms，确保DOM已渲染完成
+        setTimeout(() => {
+        loadPageNames();
+        }, 100);
+    }
+    }
+
+    // 3. 兼容没有render函数的情况：页面加载时直接执行
+    window.addEventListener('DOMContentLoaded', () => {
+    // 检查当前页面是否是图谱可视化页面（根据DOM判断）
+    if (document.getElementById('pageNameSelect')) {
+        loadPageNames();
+    }
+    });
 
     function viewGraphVisualization() {
         return `
@@ -1006,6 +1475,7 @@
             <div style="margin-top:20px; margin-bottom:20px;">
                 <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
                     <label style="font-weight:600;">岗位大类名称:</label>
+                    <!-- 保留原始ID：graphPageNameSelect -->
                     <select 
                         id="graphPageNameSelect" 
                         style="flex:1; min-width:200px; padding:10px 14px; border-radius:8px; border:1px solid rgba(11,27,58,.16); font-size:14px; background:#fff; cursor:pointer;"
@@ -1038,6 +1508,8 @@
         </section>`;
     }
 
+
+    
     function viewFavorites() {
         if (!state.user) {
             return `
@@ -1543,11 +2015,8 @@
             state.route === 'jobs' ? viewJobs() :
             state.route === 'match' ? viewMatch() :
             state.route === 'inverse' ? viewInverse() :
-<<<<<<< HEAD
             state.route === 'graph' ? viewGraphVisualization() :
-=======
             state.route === 'kg' ? viewKnowledgeGraph() :
->>>>>>> ab7f6d4097c4865aba12799824a6b79426db4030
             state.route === 'jobDetail' ? viewJobDetail() :
             state.route === 'favorites' ? viewFavorites() :
             state.route === 'applications' ? viewApplications() :
@@ -2560,8 +3029,8 @@
                             // 添加所有Page选项
                             result.pages.forEach(pageName => {
                                 const option = document.createElement('option');
-                                option.value = pageName;
-                                option.textContent = pageName;
+                                option.value = pageName.id;
+                                option.textContent = pageName.name;
                                 pageNameSelect.appendChild(option);
                             });
                             
@@ -2611,9 +3080,14 @@
                     
                     try {
                         // 调用后端API
+                        const pageNameSelect = document.getElementById('graphPageNameSelect');
+                        const pageId = pageNameSelect.value.trim();
                         const result = await apiRequest('/kg/graph-visualization', {
                             method: 'POST',
-                            body: JSON.stringify({ pageName: pageName })
+                            headers: {
+                                'Content-Type': 'application/json' // 显式声明JSON格式
+                            },
+                            body: JSON.stringify({ page_id: pageId })
                         });
                         
                         if (result.success && result.nodes && result.edges) {
@@ -2815,7 +3289,6 @@
                                     dragView: true,
                                     zoomSpeed: 1.2,
                                     dragNodes: true,
-                                    dragViewModifier: false, // 允许在整个区域内拖动视图
                                     selectConnectedEdges: true
                                 },
                                 layout: {

@@ -161,24 +161,27 @@ body {
 
 /* 轮播容器 */
 .carousel-container {
-    width: 100vw;
-    margin-left: calc(50% - 50vw);
+    max-width: 1200px;
+    width: 100%;
+    margin: 0 auto;
     overflow: hidden;
     position: relative;
     margin-bottom: 24px;
+    background: linear-gradient(135deg, rgba(43,102,255,0.15), rgba(11,181,255,0.12));
+    box-shadow: 0 4px 20px rgba(43,102,255,.08);
 }
 
 
 .carousel-track {
     display: flex;
-    width: 300%; /* 三个区域，每个占100% */
+    width: 300%;
     transition: transform 0.5s ease-in-out;
 }
 
 .carousel-slide {
-    flex: 0 0 33.333%; /* 每个区域占1/3 */
+    flex: 0 0 33.333%; 
     width: 33.333%;
-    height: 550px; /* 再增加50px高度 */
+    height: 430px; 
     overflow: hidden;
     position: relative;
 }
@@ -186,18 +189,24 @@ body {
 .carousel-slide img {
     width: 100%;
     height: 100%;
-    object-fit: cover; /* 图片填满容器，保持比例 */
+    object-fit: contain; /* 图片完整显示在容器内，保持比例 */
     display: block;
 }
 
 .carousel-slide img.carousel-img-top {
-    object-position: top; /* 图片从顶部开始显示，展示上半部分 */
+    object-position: top; 
+}
+
+.carousel-slide:nth-child(2) img,
+.carousel-slide:nth-child(3) img {
+    width: calc(100% + 20px);
+    margin-left: -10px; 
 }
 
 /* 轮播文字说明 */
 .carousel-caption {
     position: absolute;
-    right: 10%;
+    right: 6%;
     top: 50%;
     transform: translateY(-50%);
     text-align: left;
@@ -211,7 +220,7 @@ body {
     text-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     line-height: 1.15;
     letter-spacing: 0.5px;
-    font-size: 52px; /* 中文主标题放大 */
+    font-size: 52px; 
 }
 
 .carousel-title .line-1,
@@ -220,8 +229,8 @@ body {
 }
 
 .carousel-title .line-2 {
-    margin-left: 80px; /* 错落排布，第二行右移 80px */
-    margin-top: 14px;   /* 增大两行之间的行间距 */
+    margin-left: 80px; 
+    margin-top: 14px;  
 }
 
 .carousel-separator {
@@ -234,25 +243,24 @@ body {
 
 .carousel-caption p {
     margin: 0;
-    font-size: 28px;  /* 英文副标题放大 */
+    font-size: 28px;  
     color: #fff;
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    line-height: 1.6; /* 略增行高，让视觉更舒适 */
+    line-height: 1.6; 
     opacity: 0.95;
 }
 
-/* 第三屏：整体左移 700px */
 .carousel-slide:nth-child(3) .carousel-caption {
-    right: calc(10% + 650px);
+    right: calc(50%);
 }
 
 /* 第二屏：中英并排布局 */
 .caption-2 {
     display: flex;
     flex-direction: column;
-    gap: 4px; /* 与第一屏更接近的行间距 */
-    right: calc(8% + 300px); /* 整体左移约 400px */
-    top: 23%; /* 整体上移，避免过低 */
+    gap: 4px; 
+    right: calc(8% + 150px); 
+    top: 23%; 
 }
 
 .caption-2 .caption-line {
@@ -272,7 +280,7 @@ body {
 }
 
 .caption-2 .caption-line .cn {
-    font-size: 52px;    /* 与第一屏中文一致 */
+    font-size: 52px;   
     font-weight: 900;
     letter-spacing: 0.5px;
 }
@@ -290,7 +298,7 @@ body {
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 }
 
-/* 小圆点指示器 */
+/* 指示器 */
 .carousel-dots {
     position: absolute;
     bottom: 20px;
