@@ -1,0 +1,19 @@
+{
+  "user_1766430382447": {
+    "fullName": "",
+    "gender": "",
+    "age": "",
+    "phone": "",
+    "photo": "",
+    "education": "",
+    "workExperience": "",
+    "skills": {
+      "c++": 3,
+      "JavaScript": 3
+    },
+    "city": "",
+    "intro": "",
+    "userId": "user_1766430382447",
+    "updatedAt": "2025-12-23T07:36:51.617Z"
+  }
+}
