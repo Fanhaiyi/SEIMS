@@ -472,6 +472,8 @@
         }
     }
 
+    
+
     // --- Views ---
     function viewHome() {
         return `
@@ -525,27 +527,31 @@
         <!-- 功能优势 -->
         <section class="features container">
             <h2 class="features-title">平台特色</h2>
-            <div class="feature-card">
+            <!-- 精准匹配 → 能力→岗位匹配 (data-route="match") -->
+            <div class="feature-card" data-route="match" style="cursor: pointer;">
                 <div class="feature-icon">🎯</div>
                 <h3>精准匹配</h3>
                 <p>基于岗位-技能知识图谱，量化匹配度，先看是否合适再投递。</p>
             </div>
-            <div class="feature-card">
+            <!-- 能力反推 → 岗位→能力推荐 (data-route="inverse") -->
+            <div class="feature-card" data-route="inverse" style="cursor: pointer;">
                 <div class="feature-icon"><img src="assets/ability.png" alt="能力反推"></div>
                 <h3>能力反推</h3>
                 <p>从目标岗位反推能力清单与等级，补齐差距，明确提升路径。</p>
             </div>
-            <div class="feature-card">
+            <!-- 数据驱动 → 岗位浏览搜索 (data-route="jobs") -->
+            <div class="feature-card" data-route="jobs" style="cursor: pointer;">
                 <div class="feature-icon">📈</div>
                 <h3>数据驱动</h3>
                 <p>岗位数据来自 MySQL，图谱查询由 Neo4j 提供，实时响应。</p>
             </div>
-            <div class="feature-card">
+            <!-- 隐私安全 → 我的信息 (data-route="profile") -->
+            <div class="feature-card" data-route="profile" style="cursor: pointer;">
                 <div class="feature-icon">🔒</div>
                 <h3>隐私安全</h3>
                 <p>个人画像保存在本地并可同步到服务器，可随时删除与导出。</p>
             </div>
-            <div class="feature-card">
+            <div class="feature-card" data-route="inverse" style="cursor: pointer;">
                 <div class="feature-icon"><img src="assets/AI.jpg" alt="大模型推荐"></div>
                 <h3>大模型推荐</h3>
                 <p>大模型与数据库双引擎协同，推荐能力与岗位，提供多维理由与路径。</p>
@@ -564,6 +570,49 @@
             </div>
         </section>
         `;
+    }
+
+    // --- 平台特色卡片路由绑定 ---
+    function bindFeatureCardEvents() {
+        // 找到所有带跳转的特色卡片
+        const featureCards = document.querySelectorAll('.feature-card[data-route]');
+        
+        featureCards.forEach(card => {
+            card.addEventListener('click', function() {
+                const targetRoute = this.getAttribute('data-route');
+                
+                // 特殊处理：隐私安全卡片 → 先展开"我的"下拉菜单
+                if (targetRoute === 'profile') {
+                    const dropdownToggle = document.querySelector('.dropdown-toggle');
+                    if (dropdownToggle) {
+                        dropdownToggle.click(); // 触发下拉菜单展开
+                        // 确保菜单保持展开状态
+                        document.querySelector('.dropdown').classList.add('active');
+                    }
+                }
+                
+                // 调用你的核心路由函数，和顶部导航一致
+                navigate(targetRoute);
+            });
+        });
+
+        // 添加卡片交互样式（提升体验）
+        const style = document.createElement('style');
+        style.textContent = `
+            .feature-card[data-route] {
+                transition: all 0.2s ease-in-out;
+            }
+            .feature-card[data-route]:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 12px 24px rgba(34, 90, 210, 0.1);
+                border-color: rgba(43, 102, 255, 0.15);
+            }
+            .feature-card[data-route]:active {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 12px rgba(34, 90, 210, 0.08);
+            }
+        `;
+        document.head.appendChild(style);
     }
 
     function viewKnowledgeGraph() {
@@ -2025,8 +2074,62 @@
             viewAuth()
         );
         appEl.innerHTML = html;
+        
+        // 关键：如果是首页，额外绑定特色卡片的跳转事件
+        if (state.route === 'home') {
+            bindFeatureCardEvents();
+        }
+        
         bindEventsForRoute();
         updateAuthButton();
+    }
+
+    // 平台特色卡片跳转事件绑定
+    function bindFeatureCardEvents() {
+        // 找到所有带跳转标识的特色卡片
+        const featureCards = document.querySelectorAll('.feature-card[data-route]');
+        
+        featureCards.forEach(card => {
+            card.addEventListener('click', function() {
+                const targetRoute = this.getAttribute('data-route');
+                
+                // 特殊处理：隐私安全 → 先展开"我的"下拉菜单
+                if (targetRoute === 'profile') {
+                    const dropdownToggle = document.querySelector('.dropdown-toggle');
+                    if (dropdownToggle) {
+                        // 阻止事件冒泡，避免菜单刚展开就关闭
+                        dropdownToggle.click();
+                        // 强制展开下拉菜单（防止重复点击导致关闭）
+                        document.querySelector('.dropdown').classList.add('active');
+                    }
+                }
+                
+                // 调用你的核心路由函数，和顶部导航完全一致
+                navigate(targetRoute);
+            });
+        });
+
+        // 添加卡片交互样式（无需修改styles.css）
+        if (!document.querySelector('#feature-card-styles')) {
+            const style = document.createElement('style');
+            style.id = 'feature-card-styles';
+            style.textContent = `
+                .feature-card[data-route] {
+                    cursor: pointer;
+                    transition: all 0.2s ease-in-out;
+                }
+                .feature-card[data-route]:hover {
+                    transform: translateY(-5px);
+                    box-shadow: 0 12px 24px rgba(34, 90, 210, 0.1);
+                    border-color: rgba(43, 102, 255, 0.15);
+                }
+                .feature-card[data-route]:active {
+                    transform: translateY(-2px);
+                    box-shadow: 0 6px 12px rgba(34, 90, 210, 0.08);
+                }
+            `;
+            document.head.appendChild(style);
+        }
     }
 
     // --- Logic helpers ---
